@@ -6,6 +6,8 @@
     --bg: #ffffff; --panel: #f6f7f9; --ink: #1f2328; --muted: #59636e; --line: #c4cbd3;
     --node: #ffffff; --host: #eef3fb; --hostline: #9db4d8;
     --cmd: #2f6fdb; --work: #8a5cd6; --event: #0f8a7e; --alert: #d1501f; --ok: #1f8a3b;
+    /* packet fills: deep enough for white text in both themes (>= 6:1) */
+    --pk-cmd: #1f5fc7; --pk-work: #6b3fc0; --pk-event: #0b6e65; --pk-alert: #a8370c; --pk-ok: #17702f;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -27,13 +29,20 @@
   .elabel { font-size: 11px; fill: var(--muted); }
   .arrow { fill: var(--line); }
   .hl { fill: none; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
-  .pkt rect { stroke: none; }
+  .pkt rect { stroke-width: 1.5; }
   .pkt text { font-size: 11px; font-weight: 600; fill: #fff; }
-  .k-cmd { stroke: var(--cmd); } .pkt.k-cmd rect, .dot.k-cmd { fill: var(--cmd); }
-  .k-work { stroke: var(--work); } .pkt.k-work rect, .dot.k-work { fill: var(--work); }
-  .k-event { stroke: var(--event); } .pkt.k-event rect, .dot.k-event { fill: var(--event); }
-  .k-alert { stroke: var(--alert); } .pkt.k-alert rect, .dot.k-alert { fill: var(--alert); }
-  .k-ok { stroke: var(--ok); } .pkt.k-ok rect, .dot.k-ok { fill: var(--ok); }
+  .k-cmd { stroke: var(--cmd); } .dot.k-cmd { fill: var(--cmd); } .pkt.k-cmd rect { fill: var(--pk-cmd); }
+  .k-work { stroke: var(--work); } .dot.k-work { fill: var(--work); } .pkt.k-work rect { fill: var(--pk-work); }
+  .k-event { stroke: var(--event); } .dot.k-event { fill: var(--event); } .pkt.k-event rect { fill: var(--pk-event); }
+  .k-alert { stroke: var(--alert); } .dot.k-alert { fill: var(--alert); } .pkt.k-alert rect { fill: var(--pk-alert); }
+  .k-ok { stroke: var(--ok); } .dot.k-ok { fill: var(--ok); } .pkt.k-ok rect { fill: var(--pk-ok); }
+  .pkt rect { stroke: var(--pk-ring); }
+  :root { --pk-ring: var(--bg); }
+  @media (prefers-color-scheme: dark) {
+    .pkt.k-cmd rect { stroke: var(--cmd); } .pkt.k-work rect { stroke: var(--work); }
+    .pkt.k-event rect { stroke: var(--event); } .pkt.k-alert rect { stroke: var(--alert); }
+    .pkt.k-ok rect { stroke: var(--ok); }
+  }
   .dot { stroke: none; }
   .cap .h { font-size: 15px; font-weight: 600; }
   .cap .b { font-size: 12.5px; fill: var(--muted); }
