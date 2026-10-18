@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 540" width="1000" height="540" role="img" aria-labelledby="t d">
+<title id="t">tandem architecture, one spec end to end</title>
+<desc id="d">Animated: a planner submits a spec through the CLI and bridge; the supervisor starts an OpenCode session; the implementer model edits the working tree; events stream back over SSE; a protected-file permission request is escalated to a human, who denies it from a phone; the implementer finishes and the planner's wait returns the result.</desc>
+<style>
+  :root {
+    --bg: #ffffff; --panel: #f6f7f9; --ink: #1f2328; --muted: #59636e; --line: #c4cbd3;
+    --node: #ffffff; --host: #eef3fb; --hostline: #9db4d8;
+    --cmd: #2f6fdb; --work: #8a5cd6; --event: #0f8a7e; --alert: #d1501f; --ok: #1f8a3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --panel: #161b22; --ink: #e6edf3; --muted: #9198a1; --line: #3d444d;
+      --node: #161b22; --host: #121d2f; --hostline: #2f4a74;
+      --cmd: #5b9bff; --work: #b18cf2; --event: #3cc4b4; --alert: #ff8a5c; --ok: #4ccb6b;
+    }
+  }
+  text { font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: var(--ink); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .bg { fill: var(--bg); }
+  .node rect { fill: var(--node); stroke: var(--line); stroke-width: 1.5; }
+  .node .t { font-size: 14px; font-weight: 600; }
+  .node .s { font-size: 11px; fill: var(--muted); }
+  .host { fill: var(--host); stroke: var(--hostline); stroke-width: 1.5; stroke-dasharray: 6 4; }
+  .hostlabel { font-size: 11px; fill: var(--muted); }
+  .edge { fill: none; stroke: var(--line); stroke-width: 1.6; }
+  .edge.dash { stroke-dasharray: 5 4; }
+  .elabel { font-size: 11px; fill: var(--muted); }
+  .arrow { fill: var(--line); }
+  .hl { fill: none; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
+  .pkt rect { stroke: none; }
+  .pkt text { font-size: 11px; font-weight: 600; fill: #fff; }
+  .k-cmd { stroke: var(--cmd); } .pkt.k-cmd rect, .dot.k-cmd { fill: var(--cmd); }
+  .k-work { stroke: var(--work); } .pkt.k-work rect, .dot.k-work { fill: var(--work); }
+  .k-event { stroke: var(--event); } .pkt.k-event rect, .dot.k-event { fill: var(--event); }
+  .k-alert { stroke: var(--alert); } .pkt.k-alert rect, .dot.k-alert { fill: var(--alert); }
+  .k-ok { stroke: var(--ok); } .pkt.k-ok rect, .dot.k-ok { fill: var(--ok); }
+  .dot { stroke: none; }
+  .cap .h { font-size: 15px; font-weight: 600; }
+  .cap .b { font-size: 12.5px; fill: var(--muted); }
+  .cap .n { font-size: 12px; fill: var(--muted); }
+  .panel { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+  .pulse { fill: none; stroke: var(--event); stroke-width: 1.5; }
+</style>
+<rect class="bg" x="0" y="0" width="1000" height="540" rx="12"/>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="host" x="365" y="30" width="295" height="372" rx="12"/>
+<text class="hostlabel" x="378" y="50">tandem serve: one process, one event loop</text>
+<path class="edge" d="M170,90 L210,200" marker-end="url(#ah)"/>
+<path class="edge" d="M170,330 L210,220" marker-end="url(#ah)"/>
+<path class="edge" d="M330,200 L390,104" marker-end="url(#ah)"/>
+<path class="edge" d="M510,104 L587,200" marker-end="url(#ah)"/>
+<path class="edge" d="M510,228 L535,228" marker-end="url(#ah)"/>
+<path class="edge" d="M510,352 L587,256" marker-end="url(#ah)"/>
+<path class="edge" d="M640,220 L700,150" marker-end="url(#ah)"/>
+<path class="edge" d="M760,180 L760,290 L450,290 L450,256" marker-end="url(#ah)"/>
+<path class="edge" d="M625,256 L625,350 L700,350" marker-end="url(#ah)"/>
+<path class="edge" d="M840,140 L870,68" marker-end="url(#ah)"/>
+<path class="edge" d="M840,160 L870,228" marker-end="url(#ah)"/>
+<path class="edge dash" d="M770,380 L770,420 L95,420 L95,360" marker-end="url(#ah)"/>
+<text class="elabel" x="300" y="140" text-anchor="end">bearer token, loopback</text>
+<text class="elabel" x="690" y="284" text-anchor="end">SSE /event</text>
+<text class="elabel" x="440" y="414" text-anchor="middle">push</text>
+<path class="hl k-cmd" opacity="0" d="M170,90 L210,200 L390,104 L587,200"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.0000;0.0000;0.0704;0.0773;1.0000"/></path>
+<path class="hl k-cmd" opacity="0" d="M640,220 L700,150"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.0718;0.0787;0.1491;0.1560;1.0000"/></path>
+<path class="hl k-work" opacity="0" d="M840,140 L870,68 L840,140"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.1505;0.1574;0.2278;0.2347;1.0000"/></path>
+<path class="hl k-work" opacity="0" d="M840,160 L870,228"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.2292;0.2361;0.3065;0.3134;1.0000"/></path>
+<path class="hl k-event" opacity="0" d="M760,180 L760,290 L450,290 L450,256 L535,228"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.3079;0.3148;0.3852;0.3921;1.0000"/></path>
+<path class="hl k-alert" opacity="0" d="M760,180 L760,290 L450,290 L450,256 L535,228"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.3866;0.3935;0.4639;0.4708;1.0000"/></path>
+<path class="hl k-alert" opacity="0" d="M625,256 L625,350 L700,350 L770,420 L95,420 L95,360"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.4653;0.4722;0.5426;0.5495;1.0000"/></path>
+<path class="hl k-alert" opacity="0" d="M587,200 L510,104 L330,200 L170,90"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.5440;0.5509;0.6213;0.6282;1.0000"/></path>
+<path class="hl k-cmd" opacity="0" d="M170,330 L210,220 L390,104 L587,200 L700,150"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.6227;0.6296;0.7000;0.7069;1.0000"/></path>
+<path class="hl k-work" opacity="0" d="M840,140 L870,68 L840,140 L870,228"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.7014;0.7083;0.7787;0.7856;1.0000"/></path>
+<path class="hl k-event" opacity="0" d="M760,180 L760,290 L450,290 L450,256 L535,228"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.7801;0.7870;0.8574;0.8644;1.0000"/></path>
+<path class="hl k-ok" opacity="0" d="M587,200 L510,104 L330,200 L170,90"><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.8588;0.8657;0.9361;0.9431;1.0000"/></path>
+<g class="node" id="n-planner"><rect x="20" y="60" width="150" height="60" rx="9"/><text class="t" x="95.0" y="88.0" text-anchor="middle">Planner</text><text class="s" x="95.0" y="104.0" text-anchor="middle">Claude Code / Codex</text></g>
+<g class="node" id="n-phone"><rect x="20" y="300" width="150" height="60" rx="9"/><text class="t" x="95.0" y="328.0" text-anchor="middle">You, over SSH</text><text class="s" x="95.0" y="344.0" text-anchor="middle">phone / laptop</text></g>
+<g class="node" id="n-cli"><rect x="210" y="180" width="120" height="60" rx="9"/><text class="t" x="270.0" y="208.0" text-anchor="middle">tandem CLI</text><text class="s" x="270.0" y="224.0" text-anchor="middle">Typer</text></g>
+<g class="node" id="n-bridge"><rect x="390" y="76" width="120" height="56" rx="9"/><text class="t" x="450.0" y="102.0" text-anchor="middle">Bridge</text><text class="s" x="450.0" y="118.0" text-anchor="middle">FastAPI</text></g>
+<g class="node" id="n-pump"><rect x="390" y="200" width="120" height="56" rx="9"/><text class="t" x="450.0" y="226.0" text-anchor="middle">Event pump</text><text class="s" x="450.0" y="242.0" text-anchor="middle">journal + events.sse</text></g>
+<g class="node" id="n-monitor"><rect x="390" y="324" width="120" height="56" rx="9"/><text class="t" x="450.0" y="350.0" text-anchor="middle">Monitor</text><text class="s" x="450.0" y="366.0" text-anchor="middle">stall / quiet timers</text></g>
+<g class="node" id="n-sup"><rect x="535" y="200" width="105" height="56" rx="9"/><text class="t" x="587.5" y="226.0" text-anchor="middle">Supervisor</text><text class="s" x="587.5" y="242.0" text-anchor="middle">plain asyncio</text></g>
+<g class="node" id="n-oc"><rect x="700" y="120" width="140" height="60" rx="9"/><text class="t" x="770.0" y="148.0" text-anchor="middle">opencode serve</text><text class="s" x="770.0" y="164.0" text-anchor="middle">127.0.0.1, Basic auth</text></g>
+<g class="node" id="n-alerts"><rect x="700" y="320" width="140" height="60" rx="9"/><text class="t" x="770.0" y="348.0" text-anchor="middle">Alerts</text><text class="s" x="770.0" y="364.0" text-anchor="middle">command / ntfy</text></g>
+<g class="node" id="n-model"><rect x="870" y="40" width="115" height="56" rx="9"/><text class="t" x="927.5" y="66.0" text-anchor="middle">Model provider</text><text class="s" x="927.5" y="82.0" text-anchor="middle">cheap implementer</text></g>
+<g class="node" id="n-tree"><rect x="870" y="200" width="115" height="56" rx="9"/><text class="t" x="927.5" y="226.0" text-anchor="middle">Task working tree</text><text class="s" x="927.5" y="242.0" text-anchor="middle">the code</text></g>
+<rect class="pulse" x="390" y="324" width="120" height="56" rx="9"><animate attributeName="opacity" values="0.9;0;0.9" dur="2.4s" repeatCount="indefinite"/></rect>
+<g class="pkt k-cmd" opacity="0"><rect x="-30.9" y="-10" width="61.8" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">spec S-1</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.0000;0.0000;0.0664;0.0719;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M170,90 L210,200 L390,104 L587,200" keyPoints="0;0;1;1" keyTimes="0.0000;0.0000;0.0567;1.0000"/></g>
+<g class="pkt k-cmd" opacity="0"><rect x="-54.0" y="-10" width="108.0" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">prompt + marker</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.0731;0.0787;0.1451;0.1506;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M640,220 L700,150" keyPoints="0;0;1;1" keyTimes="0.0000;0.0787;0.1354;1.0000"/></g>
+<g class="pkt k-work" opacity="0"><rect x="-24.3" y="-10" width="48.6" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">tokens</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.1519;0.1574;0.2238;0.2294;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M840,140 L870,68 L840,140" keyPoints="0;0;1;1" keyTimes="0.0000;0.1574;0.2141;1.0000"/></g>
+<g class="pkt k-work" opacity="0"><rect x="-17.7" y="-10" width="35.4" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">edit</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.2306;0.2361;0.3025;0.3081;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M840,160 L870,228" keyPoints="0;0;1;1" keyTimes="0.0000;0.2361;0.2928;1.0000"/></g>
+<g class="pkt k-event" opacity="0"><rect x="-40.8" y="-10" width="81.6" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">tool events</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.3093;0.3148;0.3812;0.3868;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M760,180 L760,290 L450,290 L450,256 L535,228" keyPoints="0;0;1;1" keyTimes="0.0000;0.3148;0.3715;1.0000"/></g>
+<g class="pkt k-alert" opacity="0"><rect x="-57.3" y="-10" width="114.6" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">permission.asked</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.3880;0.3935;0.4599;0.4655;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M760,180 L760,290 L450,290 L450,256 L535,228" keyPoints="0;0;1;1" keyTimes="0.0000;0.3935;0.4502;1.0000"/></g>
+<g class="pkt k-alert" opacity="0"><rect x="-21.0" y="-10" width="42.0" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">alert</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.4667;0.4722;0.5386;0.5442;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M625,256 L625,350 L700,350 L770,420 L95,420 L95,360" keyPoints="0;0;1;1" keyTimes="0.0000;0.4722;0.5289;1.0000"/></g>
+<g class="pkt k-alert" opacity="0"><rect x="-57.3" y="-10" width="114.6" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">wait → 5 blocked</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.5454;0.5509;0.6173;0.6229;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M587,200 L510,104 L330,200 L170,90" keyPoints="0;0;1;1" keyTimes="0.0000;0.5509;0.6076;1.0000"/></g>
+<g class="pkt k-cmd" opacity="0"><rect x="-50.7" y="-10" width="101.4" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">deny + message</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.6241;0.6296;0.6960;0.7016;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M170,330 L210,220 L390,104 L587,200 L700,150" keyPoints="0;0;1;1" keyTimes="0.0000;0.6296;0.6863;1.0000"/></g>
+<g class="pkt k-work" opacity="0"><rect x="-21.0" y="-10" width="42.0" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">retry</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.7028;0.7083;0.7747;0.7803;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M840,140 L870,68 L840,140 L870,228" keyPoints="0;0;1;1" keyTimes="0.0000;0.7083;0.7650;1.0000"/></g>
+<g class="pkt k-event" opacity="0"><rect x="-44.1" y="-10" width="88.2" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">session.idle</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.7815;0.7870;0.8534;0.8590;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M760,180 L760,290 L450,290 L450,256 L535,228" keyPoints="0;0;1;1" keyTimes="0.0000;0.7870;0.8437;1.0000"/></g>
+<g class="pkt k-ok" opacity="0"><rect x="-54.0" y="-10" width="108.0" height="20" rx="10"/><text class="mono" x="0" y="4" text-anchor="middle">wait → 0 result</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.8602;0.8657;0.9321;0.9377;1.0000"/><animateMotion dur="36.0s" repeatCount="indefinite" calcMode="linear" path="M587,200 L510,104 L330,200 L170,90" keyPoints="0;0;1;1" keyTimes="0.0000;0.8657;0.9224;1.0000"/></g>
+<rect class="panel" x="20" y="446" width="960" height="78" rx="10"/>
+<g class="cap" opacity="0"><circle class="dot k-cmd" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">tandem spec S-1 --file spec.md</text><text class="b" x="60" y="503">The planner submits a spec. The bridge hands it to the supervisor, which journals it.</text><text class="n" x="964" y="477" text-anchor="end">1 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.0000;0.0000;0.0704;0.0759;1.0000"/></g>
+<g class="cap" opacity="0"><circle class="dot k-cmd" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">Fresh session, spec delivered</text><text class="b" x="60" y="503">POST /session, then /prompt_async. The marker makes delivery idempotent across restarts.</text><text class="n" x="964" y="477" text-anchor="end">2 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.0731;0.0787;0.1491;0.1546;1.0000"/></g>
+<g class="cap" opacity="0"><circle class="dot k-work" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">The cheap model works</text><text class="b" x="60" y="503">OpenCode drives the implementer model: reasoning, tool calls, more reasoning.</text><text class="n" x="964" y="477" text-anchor="end">3 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.1519;0.1574;0.2278;0.2333;1.0000"/></g>
+<g class="cap" opacity="0"><circle class="dot k-work" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">Edits land in the working tree</text><text class="b" x="60" y="503">Meanwhile the supervisor hashes protected files to catch edits made another way.</text><text class="n" x="964" y="477" text-anchor="end">4 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.2306;0.2361;0.3065;0.3120;1.0000"/></g>
+<g class="cap" opacity="0"><circle class="dot k-event" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">Every event streams back</text><text class="b" x="60" y="503">The pump reads SSE /event, writes events.sse, and feeds the supervisor. The monitor times it.</text><text class="n" x="964" y="477" text-anchor="end">5 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.3093;0.3148;0.3852;0.3907;1.0000"/></g>
+<g class="cap" opacity="0"><circle class="dot k-alert" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">The implementer wants to edit instruction.md</text><text class="b" x="60" y="503">A per-session rule stops it. OpenCode waits for a human, with the diff attached.</text><text class="n" x="964" y="477" text-anchor="end">6 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.3880;0.3935;0.4639;0.4694;1.0000"/></g>
+<g class="cap" opacity="0"><circle class="dot k-alert" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">Escalated to a human</text><text class="b" x="60" y="503">Every alert goes to notifications.log; --notify-cmd or --ntfy-topic push it to you.</text><text class="n" x="964" y="477" text-anchor="end">7 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.4667;0.4722;0.5426;0.5481;1.0000"/></g>
+<g class="cap" opacity="0"><circle class="dot k-alert" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">tandem wait returns exit 5</text><text class="b" x="60" y="503">Level-triggered: the planner sees the blocked state, however late it calls wait.</text><text class="n" x="964" y="477" text-anchor="end">8 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.5454;0.5509;0.6213;0.6269;1.0000"/></g>
+<g class="cap" opacity="0"><circle class="dot k-cmd" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">tandem deny --message &quot;leave that file alone&quot;</text><text class="b" x="60" y="503">Same client, same bridge, same journal: POST /permission/{id}/reply from your phone.</text><text class="n" x="964" y="477" text-anchor="end">9 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.6241;0.6296;0.7000;0.7056;1.0000"/></g>
+<g class="cap" opacity="0"><circle class="dot k-work" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">The implementer adjusts and finishes</text><text class="b" x="60" y="503">It writes results/S-1.json naming the active spec, written after the latest prompt.</text><text class="n" x="964" y="477" text-anchor="end">10 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.7028;0.7083;0.7787;0.7843;1.0000"/></g>
+<g class="cap" opacity="0"><circle class="dot k-event" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">The turn is over</text><text class="b" x="60" y="503">Only now is the result read, so the planner never reviews a moving target.</text><text class="n" x="964" y="477" text-anchor="end">11 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.7815;0.7870;0.8574;0.8630;1.0000"/></g>
+<g class="cap" opacity="0"><circle class="dot k-ok" cx="44" cy="472" r="6"/><text class="h mono" x="60" y="477">tandem wait returns exit 0: result</text><text class="b" x="60" y="503">The planner reads tandem result, then checks tandem diff instead of trusting it.</text><text class="n" x="964" y="477" text-anchor="end">12 / 12</text><animate attributeName="opacity" dur="36.0s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1;0;0" keyTimes="0.0000;0.8602;0.8657;0.9361;0.9417;1.0000"/></g>
+</svg>
