@@ -21,10 +21,13 @@ import logging
 import secrets
 import signal
 import socket
-from collections.abc import Callable, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
+from dataclasses import dataclass
 from types import FrameType
 
+import httpx
 import uvicorn
+from fastapi import FastAPI
 from pydantic import SecretStr
 
 from tandem.bridge.app import OpenCodeLogin, create_app
@@ -83,6 +86,58 @@ async def pump_events(
         delay = min(delay * 2, max_delay)
 
 
+async def _connect(
+    stack: contextlib.AsyncExitStack, settings: Settings, paths: TaskPaths
+) -> tuple[OpenCodeLogin, OpenCodeClient]:
+    """The OpenCode server for this task: a shared one to attach to, or our own."""
+    if settings.opencode_url and settings.opencode_password:
+        password = settings.opencode_password.get_secret_value()
+        client = await stack.enter_async_context(
+            OpenCodeClient(settings.opencode_url, password, directory=str(settings.task_dir))
+        )
+        # Free this task's instance on the way out; the server is not ours to stop.
+        stack.push_async_callback(_dispose, client)
+        return OpenCodeLogin(settings.opencode_url, password), client
+    binary = resolve_binary(settings.opencode_bin)
+    require_supported(await installed_version(binary))
+    server = await stack.enter_async_context(
+        OpenCodeServer(
+            binary,
+            settings.task_dir,
+            paths.opencode_log,
+            settings.opencode_port,
+            protected=tuple(settings.protected),
+        )
+    )
+    client = await stack.enter_async_context(OpenCodeClient(server.base_url, server.password))
+    return OpenCodeLogin(server.base_url, server.password), client
+
+
+async def _dispose(client: OpenCodeClient) -> None:
+    with contextlib.suppress(OpenCodeError):
+        await client.dispose()
+
+
+async def watch_host(
+    client: OpenCodeClient, journal: Journal, *, interval: float = 5.0, misses: int = 3
+) -> None:
+    """Return once a shared server stops answering, which stops this supervisor.
+
+    A shared server belongs to whoever started it, and goes when they do.
+    Without its server a supervisor can only fail, so it stops cleanly instead,
+    and resumes from its state file when it is next started.
+    """
+    missed = 0
+    while missed < misses:
+        await asyncio.sleep(interval)
+        try:
+            await client.health()
+            missed = 0
+        except OpenCodeError:
+            missed += 1
+    journal.append("host_lost", missed=missed)
+
+
 def bind_loopback(port: int) -> socket.socket:
     """Bind the bridge socket ourselves so its port is known before serving."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -121,29 +176,71 @@ async def _wait_until_serving(server: uvicorn.Server, serving: asyncio.Task[None
         await asyncio.sleep(0.05)
 
 
-async def run(settings: Settings, *, ready: Callable[[Manifest], None] | None = None) -> None:
-    """Supervise one task until ``/finish``, a signal, or a fatal error."""
+@dataclass
+class Task:
+    """One supervised task: its supervisor, its workers and its bridge app.
+
+    It has no server of its own, so the same task runs behind ``tandem serve``'s
+    own uvicorn or mounted beside others in one shared app.
+    """
+
+    settings: Settings
+    paths: TaskPaths
+    client: OpenCodeClient
+    supervisor: Supervisor
+    recorder: StreamRecorder
+    app: FastAPI
+    login: OpenCodeLogin
+    version: Version
+    stop: asyncio.Event
+
+    @property
+    def journal(self) -> Journal:
+        return self.supervisor.journal
+
+    def manifest(self, *, host: str, port: int, token: str, path: str = "") -> Manifest:
+        return Manifest(
+            host=host,
+            port=port,
+            path=path,
+            token=SecretStr(token),
+            task_dir=str(self.settings.task_dir),
+            state_dir=str(self.paths.root),
+            opencode_port=httpx.URL(self.login.url).port,
+            opencode_version=str(self.version),
+            opencode_password=SecretStr(self.login.password),
+        )
+
+    async def run_workers(self) -> None:
+        """Pump events and run the monitor until ``stop``, then begin shutting down.
+
+        A worker that dies takes the others with it: its exception leaves the
+        task group, as it should, rather than leaving a supervisor half alive.
+        """
+        async with asyncio.TaskGroup() as group:
+            workers = [
+                group.create_task(pump_events(self.client, self.supervisor, self.recorder)),
+                group.create_task(self.supervisor.monitor(self.settings.poll_interval)),
+            ]
+            if self.settings.opencode_url:
+                workers.append(group.create_task(watch_host(self.client, self.journal)))
+            stopping = group.create_task(self.stop.wait())
+            await asyncio.wait({stopping, *workers}, return_when=asyncio.FIRST_COMPLETED)
+            await self.supervisor.begin_shutdown()
+            for task in (stopping, *workers):
+                task.cancel()
+
+
+@contextlib.asynccontextmanager
+async def open_task(settings: Settings, *, token: str) -> AsyncGenerator[Task]:
+    """Build every part of one task; on exit, stop them and capture evidence."""
     paths = TaskPaths.for_task(settings.state_root, settings.task_dir)
     paths.ensure()
-    binary = resolve_binary(settings.opencode_bin)
-    version = require_supported(await installed_version(binary))
-
     with SupervisorLock(paths.lock):
         async with contextlib.AsyncExitStack() as stack:
-            server = await stack.enter_async_context(
-                OpenCodeServer(
-                    binary,
-                    settings.task_dir,
-                    paths.opencode_log,
-                    settings.opencode_port,
-                    protected=tuple(settings.protected),
-                )
-            )
-            client = await stack.enter_async_context(
-                OpenCodeClient(server.base_url, server.password)
-            )
-            # The binary's own report, in case PATH and OPENCODE_BIN disagree.
-            require_supported(Version.parse((await client.health()).version))
+            login, client = await _connect(stack, settings, paths)
+            # The server's own report, in case PATH and OPENCODE_BIN disagree.
+            version = require_supported(Version.parse((await client.health()).version))
 
             journal = Journal(paths.journal)
             notifier = Notifier(
@@ -174,57 +271,38 @@ async def run(settings: Settings, *, ready: Callable[[Manifest], None] | None = 
             await supervisor.start()
             stack.push_async_callback(supervisor.shutdown)
             recorder = stack.enter_context(StreamRecorder(paths.events, settings.max_stream_line))
-
             stop = asyncio.Event()
-            token = secrets.token_urlsafe(32)
-            app = create_app(
-                supervisor=supervisor,
-                token=token,
-                on_finish=stop.set,
-                opencode=OpenCodeLogin(server.base_url, server.password),
-            )
-            sock = stack.enter_context(bind_loopback(settings.bridge_port))
-            bridge = uvicorn.Server(
-                uvicorn.Config(
-                    app,
-                    log_level="warning",
-                    access_log=False,
-                    lifespan="off",
-                    timeout_graceful_shutdown=5,
-                )
-            )
-            manifest = Manifest(
-                host="127.0.0.1",
-                port=sock.getsockname()[1],
-                token=SecretStr(token),
-                task_dir=str(settings.task_dir),
-                state_dir=str(paths.root),
-                opencode_port=server.port,
-                opencode_version=str(version),
-                opencode_password=SecretStr(server.password),
-            )
+            app = create_app(supervisor=supervisor, token=token, on_finish=stop.set, opencode=login)
+            yield Task(settings, paths, client, supervisor, recorder, app, login, version, stop)
 
-            with stop_on_signals(stop):
-                try:
-                    async with asyncio.TaskGroup() as group:
-                        serving = group.create_task(bridge.serve(sockets=[sock]))
-                        workers = [
-                            group.create_task(pump_events(client, supervisor, recorder)),
-                            group.create_task(supervisor.monitor(settings.poll_interval)),
-                        ]
-                        await _wait_until_serving(bridge, serving)
-                        manifest.write(paths.manifest)
-                        journal.append("bridge_ready", url=manifest.url, pid=manifest.pid)
-                        if ready is not None:
-                            ready(manifest)
 
-                        stopping = group.create_task(stop.wait())
-                        await asyncio.wait(
-                            {serving, stopping, *workers}, return_when=asyncio.FIRST_COMPLETED
-                        )
-                        await supervisor.begin_shutdown()
-                        bridge.should_exit = True
-                        for task in (stopping, *workers):
-                            task.cancel()
-                finally:
-                    Manifest.remove(paths.manifest)
+async def run(settings: Settings, *, ready: Callable[[Manifest], None] | None = None) -> None:
+    """Supervise one task behind a bridge of its own, until ``/finish``, a signal or a fault."""
+    token = secrets.token_urlsafe(32)
+    async with open_task(settings, token=token) as task, contextlib.AsyncExitStack() as stack:
+        sock = stack.enter_context(bind_loopback(settings.bridge_port))
+        bridge = uvicorn.Server(
+            uvicorn.Config(
+                task.app,
+                log_level="warning",
+                access_log=False,
+                lifespan="off",
+                timeout_graceful_shutdown=5,
+            )
+        )
+        manifest = task.manifest(host="127.0.0.1", port=sock.getsockname()[1], token=token)
+        with stop_on_signals(task.stop):
+            try:
+                async with asyncio.TaskGroup() as group:
+                    serving = group.create_task(bridge.serve(sockets=[sock]))
+                    working = group.create_task(task.run_workers())
+                    await _wait_until_serving(bridge, serving)
+                    manifest.write(task.paths.manifest)
+                    task.journal.append("bridge_ready", url=manifest.url, pid=manifest.pid)
+                    if ready is not None:
+                        ready(manifest)
+                    await asyncio.wait({serving, working}, return_when=asyncio.FIRST_COMPLETED)
+                    task.stop.set()
+                    bridge.should_exit = True
+            finally:
+                Manifest.remove(task.paths.manifest)

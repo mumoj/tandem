@@ -178,8 +178,9 @@ function el(tag, attrs, ...children) {
 
 class Unauthorized extends Error {}
 
+// Relative to the page, so the dashboard works at /ui and mounted at /t/<task>/ui alike.
 async function api(path, body) {
-  const response = await fetch(path, {
+  const response = await fetch(path.replace(/^\//, ""), {
     method: body === undefined ? "GET" : "POST",
     headers: { Authorization: "Bearer " + token, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
     body: body === undefined ? undefined : JSON.stringify(body),

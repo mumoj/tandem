@@ -15,7 +15,7 @@ import re
 import time
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Any, Self
+from typing import IO, Any, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 
@@ -45,6 +45,30 @@ class Event(BaseModel):
         """Parse one SSE ``data`` payload, or ``None`` if it is not an event."""
         try:
             event = cls.model_validate_json(data)
+        except ValidationError:
+            return None
+        event._raw = data
+        return event
+
+    @classmethod
+    def parse_global(cls, data: str, directory: str) -> Event | None:
+        """One ``/global/event`` payload, if it belongs to ``directory``.
+
+        A server shared by several tasks wraps every event as
+        ``{"directory": ..., "payload": event}``. Events without a directory,
+        such as ``server.connected``, concern every listener and are kept.
+        """
+        try:
+            envelope = json.loads(data)
+        except ValueError:
+            return None
+        if not isinstance(envelope, dict):
+            return None
+        wrapped = cast(dict[str, Any], envelope)
+        if wrapped.get("directory") not in (None, directory):
+            return None
+        try:
+            event = cls.model_validate(wrapped.get("payload"))
         except ValidationError:
             return None
         event._raw = data

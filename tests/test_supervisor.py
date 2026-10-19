@@ -531,6 +531,38 @@ async def test_resync_finds_a_subagent_blocked_while_disconnected(
     assert attention.reason is WaitReason.BLOCKED
 
 
+async def test_a_subagent_is_forbidden_to_edit_protected_files(
+    supervisor: Supervisor, api: FakeOpenCode, paths: TaskPaths
+) -> None:
+    record = await supervisor.submit_spec("S-1", "Add a greeting.")
+    child = api.add_subagent(record.session_id)
+    own = {"permission": "task", "pattern": "*", "action": "deny"}
+    info = {"id": child, "parentID": record.session_id, "permission": [own]}
+    await supervisor.handle_event(event("session.created", sessionID=child, info=info))
+
+    rules = [(r.permission, r.pattern, r.action) for r in api.sessions[child].rules]
+    # Its own rules first, then the guard, last so it wins: deny, never a looser ask.
+    assert rules == [
+        ("task", "*", PermissionAction.DENY),
+        ("edit", "instruction.md", PermissionAction.DENY),
+    ]
+    assert "subagent_guarded" in journal_actions(paths)
+
+
+async def test_a_subagent_permission_request_reaches_the_human(
+    supervisor: Supervisor, api: FakeOpenCode, paths: TaskPaths
+) -> None:
+    record = await supervisor.submit_spec("S-1", "Add a greeting.")
+    child = api.add_subagent(record.session_id)
+    info = {"id": child, "parentID": record.session_id}
+    await supervisor.handle_event(event("session.created", sessionID=child, info=info))
+    asked = {"id": "per_7", "sessionID": child, "permission": "bash", "patterns": ["rm -rf /"]}
+    await supervisor.handle_event(event("permission.asked", **asked))
+
+    assert "permission" in paths.notifications.read_text()
+    assert supervisor.attention() is not None
+
+
 async def test_a_spec_can_choose_its_model_and_agent(
     supervisor: Supervisor, api: FakeOpenCode
 ) -> None:

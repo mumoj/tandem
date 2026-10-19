@@ -116,6 +116,11 @@ class FakeOpenCode:
             }
         )
 
+    async def set_session_permission(
+        self, session_id: str, permission: list[PermissionRule]
+    ) -> None:
+        self._session(session_id).rules = list(permission)
+
     async def session_status(self) -> dict[str, SessionStatus]:
         return dict(self.statuses)
 

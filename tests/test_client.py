@@ -10,6 +10,7 @@ import pytest
 import respx
 
 from tandem.opencode.client import NotFoundError, OpenCodeClient, OpenCodeError
+from tandem.opencode.events import Event
 from tandem.opencode.models import ModelRef, PermissionAction, PermissionRule
 from tandem.opencode.server import (
     UnsupportedVersionError,
@@ -187,3 +188,39 @@ def test_model_ref_needs_a_provider() -> None:
     assert (ref.provider_id, ref.model_id) == ("anthropic", "claude-sonnet-4-5")
     with pytest.raises(ValueError, match="provider/model"):
         ModelRef.parse("gpt-5")
+
+
+def test_a_shared_stream_keeps_only_this_directory_and_global_events() -> None:
+    mine = json.dumps(
+        {"directory": "/work/a", "payload": {"type": "session.idle", "properties": {}}}
+    )
+    theirs = json.dumps({"directory": "/work/b", "payload": {"type": "session.idle"}})
+    everyone = json.dumps({"payload": {"type": "server.connected", "properties": {}}})
+
+    kept = [Event.parse_global(data, "/work/a") for data in (mine, theirs, everyone, "nope")]
+
+    assert [event.type if event else None for event in kept] == [
+        "session.idle",
+        None,
+        "server.connected",
+        None,
+    ]
+    assert kept[0] is not None
+    assert kept[0].raw == mine
+
+
+@respx.mock
+async def test_a_tenant_client_names_its_directory_on_every_request() -> None:
+    route = respx.get(f"{BASE}/session/status").respond(json={})
+    async with OpenCodeClient(BASE, "pw", directory="/work/a") as tenant:
+        await tenant.session_status()
+    assert route.calls.last.request.url.params["directory"] == "/work/a"
+
+
+@respx.mock
+async def test_a_session_permission_can_be_replaced(client: OpenCodeClient) -> None:
+    route = respx.patch(f"{BASE}/session/ses_1").respond(json={})
+    rule = PermissionRule(permission="edit", pattern="a.md", action=PermissionAction.DENY)
+    await client.set_session_permission("ses_1", [rule])
+    body = json.loads(route.calls.last.request.content)
+    assert body == {"permission": [{"permission": "edit", "pattern": "a.md", "action": "deny"}]}

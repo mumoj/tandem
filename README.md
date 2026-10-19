@@ -123,20 +123,74 @@ model write the tests for citations.py through tandem", and it uses the tools:
 `submit_spec`, `wait`, `get_result`, `get_pending`, `reply_permission`, `send_directive`,
 `finish`, and the rest. The server's instructions teach it the planner loop.
 
-- **Nothing to start.** The first `submit_spec` starts a supervisor for the planner's project.
-  The supervisor outlives the MCP server, and a planner restarted later finds it again by
-  directory. `start_implementer` is only for setting a default model or protected files.
+- **Nothing to start.** When the planner connects, `tandem mcp` starts one OpenCode server in
+  the background, and the first `submit_spec` starts a supervisor for the planner's project.
+  `start_implementer` is only for setting a default model or protected files.
+- **Lives as long as the planner.** Everything runs in the `tandem mcp` process and its one
+  OpenCode child. When the planner disconnects or exits, every supervisor finishes, capturing
+  its evidence, and OpenCode stops. State stays on disk, so the next session resumes it.
 - **Any implementer, per spec.** `submit_spec` takes `model` (`provider/model`) and `agent`
   (`build`, `plan`, or one from your OpenCode config). `list_models` shows what is available.
 - **Subagents count.** When the implementer delegates to an OpenCode subagent, the subagent's
   permission requests block the spec and its activity keeps the spec alive. Protected files
   are enforced in its session too.
-- **Several implementers.** Each working tree gets its own supervisor. For parallel work, give
-  each implementer a git worktree and pass it as `workdir`. `list_implementers` shows them all.
+- **Several implementers at once.** For independent pieces of one task, the planner calls
+  `spawn_implementer` once per piece. See below.
+
+## Parallel implementers
+
+Like a planner's own subagents, but each one is a cheaper model with its own guardrails:
+
+```text
+spawn_implementer(name="farewell", text=..., model="openai/gpt-5.6-luna")
+spawn_implementer(name="subtract", text=..., model="openai/gpt-5.6-luna")
+wait_any()                                   # wakes when either one needs the planner
+land_implementer(name="farewell")            # review: the diff against where it forked
+land_implementer(name="farewell", action="merge")
+```
+
+- **Isolated where it matters.** Each implementer works on its own branch, `tandem/<name>`, in
+  a git worktree under the state root, outside the repository, with its own supervisor,
+  journal and protected files. The planner's working tree stays clean.
+- **One wait for all of them.** `wait_any` returns as soon as any implementer finishes, blocks
+  or stops, and lists every one that needs attention. While it waits, it announces each
+  change as an MCP progress message ("farewell finished S-1: result"), so the planner's UI
+  shows an implementer ending as it happens.
+- **Addressed by name.** Every other tool takes the implementer's name as `workdir`:
+  `get_pending(workdir="farewell")`, `send_directive(..., workdir="farewell")`.
+- **Landing is explicit.** `review` shows committed and uncommitted changes against the fork
+  point. `merge` commits what the implementer left and merges it into the current branch, and
+  a conflicting merge is aborted, leaving the repository untouched. `discard` throws the work
+  away. Both stop the supervisor, remove the worktree and branch, and keep its state under
+  `landed/` as evidence. Files left behind by running checks, such as `__pycache__`, are
+  never committed.
+- **Cheap to add.** Implementers share one process and one OpenCode server (see below), so a
+  new one starts in a few seconds once the session's OpenCode is up.
+
+## One process, one OpenCode
+
+Under the MCP server, nothing sprawls. `tandem mcp` is the only tandem process:
+
+- **One FastAPI app, one uvicorn.** Each implementer's bridge is mounted at `/t/<task>` in a
+  single app, beside an overview page at `/ui` that lists every implementer. A task's manifest
+  points at its mount, so the CLI and the tools reach it exactly as they reach a standalone one.
+- **One OpenCode server.** Every implementer is a tenant of it, scoped to its own directory
+  through OpenCode's `directory` parameter and reading its own events from the server-wide
+  stream. It starts when the planner connects, so its startup is paid once per session.
+- **Subagents stay guarded.** A server-wide config cannot know each implementer's protected
+  files, so when a subagent's session appears, its supervisor patches that session to deny
+  edits to them. The content hash still backs this up.
+- **Nothing outlives the session.** On Linux the kernel stops OpenCode if `tandem mcp` dies
+  without cleaning up; elsewhere, the next session stops any server its predecessor left.
+
+`TANDEM_OPENCODE_MODE=isolated` restores one `tandem serve` process and one OpenCode per
+implementer, each outliving the planner, for when one wedged server must not stall the rest.
+Plain `tandem serve` from the CLI is always isolated.
 
 ## Watch it in a browser
 
-Every tool reply carries a `dashboard` link, and `tandem serve` prints it on startup. The page
+Every tool reply carries a `dashboard` link, plus an `overview` link to the page that lists
+every implementer of the session. `tandem serve` prints its dashboard link on startup. The page
 shows what the implementer is doing and why `wait` would return right now, its latest
 messages, the result and changed files, spend, and a timeline of everything in the journal.
 Permission requests and questions appear with **Allow**/**Deny** and answer buttons, so the
@@ -254,6 +308,7 @@ Every option of `tandem serve` can also come from the environment with a `TANDEM
 | `TANDEM_STATE_ROOT` | `$XDG_STATE_HOME/tandem` | where task state lives |
 | `TANDEM_OPENCODE_BIN` | `opencode` | the OpenCode binary |
 | `TANDEM_WORKDIR` | the MCP server's working directory | the project `tandem mcp` acts on by default |
+| `TANDEM_OPENCODE_MODE` | `shared` | `isolated`: one process and OpenCode per implementer |
 
 ## On disk
 
@@ -268,8 +323,12 @@ manifest.json        bridge URL and token, OpenCode login, 0600, removed on clea
 results/<spec>.json  the implementer's results
 sessions/<spec>/     final messages and totals per spec
 opencode.log         the OpenCode server's own output
-serve.log            the supervisor's own output, when the MCP server started it
+serve.log            the supervisor's own output, when started in isolated mode
 ```
+
+Beside the tasks, `hosts/` holds the shared OpenCode server's log and a record of it, which is
+how a later session finds a server orphaned by a crash. `worktrees/` holds parallel
+implementers' worktrees, and `landed/` the state of implementers that were merged or discarded.
 
 Files holding tokens, prompts or model output are created 0600.
 
@@ -287,7 +346,8 @@ in `tests/scripted_llm.py`. Only the model's choices are scripted; OpenCode's pe
 system and event stream are the real thing. They cover a protected edit stopped and rejected,
 a question answered, a correction applied, a second spec, a shell edit caught by the hash
 guard, and a supervisor restart mid-spec. The MCP tools are tested against a mocked bridge in
-`tests/test_mcp.py`.
+`tests/test_mcp.py`, and implementer worktrees against a real git repository in
+`tests/test_worktrees.py`.
 
 ## Design notes
 
@@ -296,11 +356,16 @@ guard, and a supervisor restart mid-spec. The MCP tools are tested against a moc
   stops OpenCode on the way out.
 - **OpenCode runs as a separate process.** OpenCode's SDK can host it in-process, but a
   supervisor that shares a process with what it supervises cannot restart it when it wedges.
+  Under the MCP server, one OpenCode is shared, and replaced if it dies.
+- **A task is not a server.** `open_task` builds a supervisor and its bridge app with no server
+  of its own, so the same task runs behind `tandem serve`'s uvicorn or mounted in the hub's.
 - **FastAPI only where there is a server.** The OpenCode client is httpx, the supervisor is
   plain asyncio, and the CLI is Typer over the same pydantic models the bridge serves.
 - **`OpenCodeAPI` is a protocol.** The supervisor never sees HTTP, so the unit tests use an
   in-memory fake and an OpenCode 2 adapter would be one new class.
 - **Plain files, not a database.** The planner reads the journal with `grep`.
+- **Git is the registry.** Parallel implementers are found from `git worktree list`, so there
+  is no second record of them that could disagree with the repository.
 - **The MCP server is a thin client.** `tandem mcp` holds no state: it finds a supervisor by
   directory, starts one detached if there is none, and calls the same bridge endpoints as the
   CLI. Restarting the planner loses nothing.

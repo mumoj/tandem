@@ -11,8 +11,9 @@ import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,6 +39,10 @@ class Settings(BaseSettings):
 
     opencode_bin: str = "opencode"
     opencode_port: int = 0
+    opencode_url: str | None = None
+    """An ``opencode serve`` shared with other tasks. ``None`` starts one of our own."""
+    opencode_password: SecretStr | None = None
+    """The shared server's password. Comes from the environment, never argv."""
     bridge_port: int = 0
     state_root: Path = Field(default_factory=default_state_root)
 
@@ -71,6 +76,12 @@ class Settings(BaseSettings):
         if not resolved.is_dir():
             raise ValueError(f"no such task directory: {resolved}")
         return resolved
+
+    @model_validator(mode="after")
+    def _shared_server_needs_its_password(self) -> Self:
+        if (self.opencode_url is None) != (self.opencode_password is None):
+            raise ValueError("opencode_url and opencode_password go together")
+        return self
 
     @field_validator("model")
     @classmethod

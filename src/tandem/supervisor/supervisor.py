@@ -29,6 +29,7 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -36,12 +37,15 @@ from tandem.config import TaskPaths
 from tandem.notify import Alert, Notifier
 from tandem.opencode.client import NotFoundError, OpenCodeAPI, OpenCodeError
 from tandem.opencode.events import Event
+from tandem.opencode.jsonpath import dig
 from tandem.opencode.models import (
     FileDiff,
     Message,
     ModelRef,
+    PermissionAction,
     PermissionReply,
     PermissionRequest,
+    PermissionRule,
     QuestionRequest,
     Session,
     TokenUsage,
@@ -603,10 +607,15 @@ class Supervisor:
         if event.type == "server.connected":
             # A (re)connect means replies may have been missed while away.
             self._resync_needed = True
+        known = set(self.tracker.children)
         self.tracker.observe(event)
+        for child in self.tracker.children - known:
+            await self._guard_subagent(child, dig(event.properties, "info", "permission"))
         record = self.state.current
         mine = record is not None and event.session_id == record.session_id
-        if record is not None and mine:
+        # A subagent waiting on a human is the spec waiting on a human.
+        ours = record is not None and event.session_id in self.tracker.family
+        if record is not None and ours:
             alert = Alert.from_event(event)
             if alert is not None:
                 self.journal.append(
@@ -642,8 +651,10 @@ class Supervisor:
         for session_id in {p.session_id for p in [*pending.permissions, *pending.questions]}:
             if session_id not in self.tracker.family:
                 with contextlib.suppress(OpenCodeError):
-                    parent = (await self.api.get_session(session_id)).parent_id
-                    self.tracker.adopt(session_id, parent)
+                    session = await self.api.get_session(session_id)
+                    if self.tracker.adopt(session_id, session.parent_id):
+                        extra = session.model_extra or {}
+                        await self._guard_subagent(session_id, extra.get("permission"))
         family = self.tracker.family
         mine = {p.id for p in pending.permissions if p.session_id in family}
         mine |= {q.id for q in pending.questions if q.session_id in family}
@@ -797,6 +808,34 @@ class Supervisor:
             raise ConflictError(
                 f"protected files still differ: {', '.join(changed)}; restore them first"
             )
+
+    async def _guard_subagent(self, session_id: str, rules: object) -> None:
+        """Forbid a subagent's session to edit protected files.
+
+        A subagent runs in a session of its own, created by OpenCode with its
+        agent's rules, not the spec's. The protected files are appended as deny
+        rules, last so they win: ask would loosen an agent that already denies
+        edits. Should the patch fail, the content hash still catches the edit.
+        """
+        if not self.protected.patterns:
+            return
+        existing = [
+            PermissionRule.model_validate(rule)
+            for rule in (cast(list[object], rules) if isinstance(rules, list) else [])
+            if isinstance(rule, dict)
+        ]
+        guards = [
+            PermissionRule(permission="edit", pattern=pattern, action=PermissionAction.DENY)
+            for pattern in self.protected.patterns
+        ]
+        try:
+            await self.api.set_session_permission(session_id, [*existing, *guards])
+        except OpenCodeError as exc:
+            self.journal.append("subagent_unguarded", session_id=session_id, error=str(exc))
+            return
+        self.journal.append(
+            "subagent_guarded", session_id=session_id, spec_id=self.state.current_spec_id
+        )
 
     def _protected_changes(self, record: SpecRecord) -> list[str]:
         """Protected files changed since ``record``'s baseline, under its own patterns."""

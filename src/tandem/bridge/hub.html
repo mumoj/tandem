@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>tandem</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1f2328; --muted: #59636e; --line: #d8dee4;
+    --soft: #eef1f4; --work: #7a4fd0; --ok: #1a7f37; --warn: #9a6700; --alert: #c2410c; --bad: #cf222e;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --panel: #161b22; --ink: #e6edf3; --muted: #9198a1; --line: #30363d;
+      --soft: #1f2630; --work: #b18cf2; --ok: #4ccb6b; --warn: #d29922; --alert: #ff8a5c; --bad: #ff6b6b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 16px; }
+  header h1 { font-size: 16px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  main { max-width: 960px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+  a.card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px;
+    color: inherit; text-decoration: none; }
+  a.card:hover { border-color: var(--muted); }
+  .name { font-weight: 650; }
+  .dir { color: var(--muted); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+  .meta { color: var(--muted); font-size: 13px; grid-column: 1; }
+  .pill { grid-row: 1 / span 3; grid-column: 2; display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; background: var(--soft); }
+  .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .s-working { color: var(--work); } .s-idle, .s-no_spec { color: var(--muted); }
+  .s-blocked { color: var(--alert); } .s-hung, .s-reasoning_stall { color: var(--warn); }
+  .s-error, .s-protected_violation, .s-offline { color: var(--bad); }
+  .s-result, .s-turn_ended { color: var(--ok); }
+  .s-working::before { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .empty, .banner { color: var(--muted); padding: 24px 16px; text-align: center; }
+  .banner { color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1>tandem</h1>
+  <p>Every implementer of this planner session. Open one to watch it and answer its requests.</p>
+</header>
+<main id="list"><p class="empty">Loading…</p></main>
+<script>
+"use strict";
+function readToken() {
+  const fromLink = new URLSearchParams(location.hash.slice(1)).get("token");
+  try {
+    if (fromLink) sessionStorage.setItem("tandem-hub-token", fromLink);
+    return fromLink || sessionStorage.getItem("tandem-hub-token") || "";
+  } catch { return fromLink || ""; }
+}
+const token = readToken();
+const headers = { Authorization: "Bearer " + token };
+const LABELS = { result: "result", turn_ended: "turn ended", blocked: "needs you", hung: "hung",
+  reasoning_stall: "reasoning stall", error: "error", protected_violation: "protected file changed",
+  no_spec: "no spec", stopped: "stopping" };
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, v);
+  for (const child of children) if (child != null) node.append(child);
+  return node;
+}
+
+async function json(path) {
+  const response = await fetch(path, { headers, cache: "no-store" });
+  if (!response.ok) throw new Error(String(response.status));
+  return response.json();
+}
+
+async function card(task) {
+  // The task's dashboard link carries the same token; its API lives beside it.
+  const base = new URL(task.dashboard).pathname.replace(/ui$/, "");
+  let state = "offline", label = "offline", meta = "";
+  try {
+    const o = await json(base + "overview");
+    state = o.attention || o.status.activity.activity;
+    label = LABELS[state] || state;
+    meta = [o.status.spec_id, o.status.model, o.status.agent].filter(Boolean).join(" · ");
+  } catch { /* stopping */ }
+  return el("a", { class: "card", href: task.dashboard, target: "_blank", rel: "noreferrer" },
+    el("span", { class: "name" }, task.name),
+    el("span", { class: "pill s-" + state }, label),
+    el("span", { class: "dir" }, task.task_dir),
+    el("span", { class: "meta" }, meta || "no spec yet"));
+}
+
+async function refresh() {
+  const list = document.getElementById("list");
+  try {
+    const { tasks } = await json("tasks");
+    const cards = await Promise.all(tasks.map(card));
+    list.replaceChildren(...(cards.length ? cards
+      : [el("p", { class: "empty" }, "No implementers yet. They appear here as the planner starts them.")]));
+  } catch {
+    list.replaceChildren(el("p", { class: "banner" },
+      "The hub is not answering. The planner session may have ended."));
+  }
+}
+
+if (token) {
+  history.replaceState(null, "", location.pathname);
+  refresh();
+  setInterval(refresh, 2000);
+} else {
+  document.getElementById("list").replaceChildren(el("p", { class: "banner" },
+    "This page needs the link the planner gave you, which carries an access token."));
+}
+</script>
+</body>
+</html>

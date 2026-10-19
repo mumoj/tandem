@@ -21,6 +21,8 @@ class Manifest(BaseModel):
     version: Literal[1] = 1
     host: str
     port: int
+    path: str = ""
+    """Where this task's bridge is mounted, when one server hosts several."""
     token: SecretStr
     task_dir: str
     state_dir: str
@@ -38,7 +40,7 @@ class Manifest(BaseModel):
 
     @property
     def url(self) -> str:
-        return f"http://{self.host}:{self.port}"
+        return f"http://{self.host}:{self.port}{self.path}"
 
     @property
     def dashboard_url(self) -> str:

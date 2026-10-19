@@ -57,6 +57,10 @@ class OpenCodeAPI(Protocol):
 
     async def get_session(self, session_id: str) -> Session: ...
 
+    async def set_session_permission(
+        self, session_id: str, permission: list[PermissionRule]
+    ) -> None: ...
+
     async def session_status(self) -> dict[str, SessionStatus]: ...
 
     async def messages(self, session_id: str, limit: int | None = None) -> list[Message]: ...
@@ -99,6 +103,10 @@ class OpenCodeClient:
     exclusive lock in the first version let one slow call, a multi-megabyte
     evidence capture, stall the supervisor, the bridge and permission replies
     behind it.
+
+    With ``directory``, the client is one tenant of a server shared by several
+    tasks: every request names its directory, and the event stream is the
+    server-wide one filtered to it.
     """
 
     def __init__(
@@ -109,11 +117,14 @@ class OpenCodeClient:
         username: str = "opencode",
         timeout: float = 60.0,
         max_connections: int = 8,
+        directory: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        self.directory = directory
         self._http = httpx.AsyncClient(
             base_url=base_url,
             auth=(username, password),
+            params={"directory": directory} if directory else None,
             timeout=httpx.Timeout(timeout, connect=5.0),
             limits=httpx.Limits(max_connections=max_connections),
             transport=transport,
@@ -165,6 +176,12 @@ class OpenCodeClient:
     async def get_session(self, session_id: str) -> Session:
         response = await self._request("GET", f"/session/{session_id}")
         return Session.model_validate_json(response.content)
+
+    async def set_session_permission(
+        self, session_id: str, permission: list[PermissionRule]
+    ) -> None:
+        body = {"permission": [rule.model_dump(mode="json") for rule in permission]}
+        await self._request("PATCH", f"/session/{session_id}", json=body)
 
     async def session_status(self) -> dict[str, SessionStatus]:
         response = await self._request("GET", "/session/status")
@@ -225,21 +242,27 @@ class OpenCodeClient:
         await self._request("POST", "/instance/dispose")
 
     async def events(self) -> AsyncIterator[Event]:
-        """One connection to ``/event``. Returns when the server closes it.
+        """One connection to the event stream. Returns when the server closes it.
 
         Reconnecting is the caller's decision: the supervisor needs to resync
         what it missed while disconnected, which a transparent retry here would
         hide from it.
         """
+        path = "/global/event" if self.directory else "/event"
         timeout = httpx.Timeout(None, connect=5.0)
         try:
-            async with aconnect_sse(self._http, "GET", "/event", timeout=timeout) as source:
+            async with aconnect_sse(self._http, "GET", path, timeout=timeout) as source:
                 source.response.raise_for_status()
                 async for message in source.aiter_sse():
-                    if message.data and (event := Event.parse(message.data)) is not None:
+                    if message.data and (event := self._parse(message.data)) is not None:
                         yield event
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
-            raise OpenCodeError("GET", "/event", status, "event stream refused") from exc
+            raise OpenCodeError("GET", path, status, "event stream refused") from exc
         except httpx.HTTPError as exc:
-            raise OpenCodeError("GET", "/event", None, f"{type(exc).__name__}: {exc}") from exc
+            raise OpenCodeError("GET", path, None, f"{type(exc).__name__}: {exc}") from exc
+
+    def _parse(self, data: str) -> Event | None:
+        if self.directory:
+            return Event.parse_global(data, self.directory)
+        return Event.parse(data)

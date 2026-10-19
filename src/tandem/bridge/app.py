@@ -24,7 +24,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from tandem import __version__
 from tandem.bridge.schemas import (
@@ -86,17 +87,27 @@ def require_token(
 SupervisorDep = Annotated[Supervisor, Depends(get_supervisor)]
 
 
-class BodyLimit(BaseHTTPMiddleware):
-    """Refuse oversized bodies before anything parses them."""
+class BodyLimit:
+    """Refuse oversized bodies before anything parses them.
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        length = request.headers.get("content-length")
-        if length is not None and (not length.isdigit() or int(length) > MAX_BODY_BYTES):
-            return JSONResponse(
-                {"detail": f"request body over {MAX_BODY_BYTES} bytes"},
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            )
-        return await call_next(request)
+    Plain ASGI rather than ``BaseHTTPMiddleware``, which wraps every request in
+    an extra task and buffers what passes through it.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            length = Headers(scope=scope).get("content-length")
+            if length is not None and (not length.isdigit() or int(length) > MAX_BODY_BYTES):
+                response = JSONResponse(
+                    {"detail": f"request body over {MAX_BODY_BYTES} bytes"},
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def _spec_out(supervisor: Supervisor, record: SpecRecord) -> SpecOut:
@@ -128,7 +139,7 @@ async def read_overview(supervisor: SupervisorDep) -> OverviewOut:
 
 
 @router.get("/journal")
-async def read_journal(
+def read_journal(  # a plain def: FastAPI runs it in its threadpool, off the event loop
     supervisor: SupervisorDep,
     after: Annotated[int | None, Query(ge=0)] = None,
     limit: Annotated[int, Query(gt=0, le=1000)] = 200,
@@ -255,20 +266,22 @@ class OpenCodeLogin:
     password: str
 
 
+def dashboard_headers() -> dict[str, str]:
+    """For a page that holds no data and talks only to the server that sent it."""
+    return {
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Frame-Options": "DENY",
+        "Content-Security-Policy": (
+            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+            "connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'"
+        ),
+    }
+
+
 def _dashboard() -> HTMLResponse:
     page = files("tandem.bridge").joinpath("dashboard.html").read_text(encoding="utf-8")
-    return HTMLResponse(
-        page,
-        headers={
-            "Cache-Control": "no-store",
-            "Referrer-Policy": "no-referrer",
-            "X-Frame-Options": "DENY",
-            "Content-Security-Policy": (
-                "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-                "connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'"
-            ),
-        },
-    )
+    return HTMLResponse(page, headers=dashboard_headers())
 
 
 def _error(status_code: int) -> Callable[[Request, Exception], Awaitable[Response]]:
