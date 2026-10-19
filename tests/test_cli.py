@@ -18,7 +18,9 @@ URL = "http://127.0.0.1:41999"
 runner = CliRunner()
 
 
-def write_manifest(root: Path, name: str, *, pid: int | None = None) -> Manifest:
+def write_manifest(
+    root: Path, name: str, *, pid: int | None = None, opencode_password: str | None = "ocpw"
+) -> Manifest:
     manifest = Manifest(
         host="127.0.0.1",
         port=41999,
@@ -27,6 +29,7 @@ def write_manifest(root: Path, name: str, *, pid: int | None = None) -> Manifest
         state_dir=str(root / name),
         opencode_port=4096,
         opencode_version="1.19.3",
+        opencode_password=SecretStr(opencode_password) if opencode_password else None,
         pid=pid or os.getpid(),
     )
     manifest.write(root / name / "manifest.json")
@@ -82,6 +85,51 @@ def test_json_output_is_the_raw_response(state_root: Path) -> None:
     code, output = invoke(state_root, "status", "--json")
     assert code == 0
     assert json.loads(output)["activity"]["pending"] == ["per_1"]
+
+
+@respx.mock
+def test_attach_hands_the_terminal_to_opencode(
+    state_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    respx.get(f"{URL}/status").respond(json=STATUS)
+    calls: list[tuple[str, list[str], dict[str, str]]] = []
+    monkeypatch.setattr(os, "execvpe", lambda *call: calls.append(call))  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+
+    code, _ = invoke(state_root, "attach")
+
+    assert code == 0
+    ((binary, argv, env),) = calls
+    assert binary == "opencode"
+    assert argv == [
+        "opencode",
+        "attach",
+        "http://127.0.0.1:4096",
+        "--dir",
+        "/work/demo-abc123",
+        "--session",
+        "ses_1",
+    ]
+    assert env["OPENCODE_SERVER_PASSWORD"] == "ocpw"
+    assert "ocpw" not in argv
+
+
+@respx.mock
+def test_attach_web_prints_the_login(state_root: Path) -> None:
+    respx.get(f"{URL}/status").respond(json=STATUS)
+    code, output = invoke(state_root, "attach", "--web")
+    assert code == 0
+    assert "url      http://127.0.0.1:4096" in output
+    assert "password ocpw" in output
+    assert "session  ses_1" in output
+
+
+@respx.mock
+def test_attach_to_an_older_supervisor_says_restart(tmp_path: Path) -> None:
+    write_manifest(tmp_path, "old-abc123", opencode_password=None)
+    respx.get(f"{URL}/status").respond(json=STATUS)
+    code, output = invoke(tmp_path, "attach")
+    assert code == 1
+    assert "restart it" in output
 
 
 @pytest.mark.parametrize(

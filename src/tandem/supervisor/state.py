@@ -53,11 +53,17 @@ class SpecRecord(BaseModel):
     digest: str
     text: str
     session_id: str
+    model: str | None = None
+    """``provider/model`` for this spec; ``None`` uses the supervisor's default."""
+    agent: str | None = None
+    """The OpenCode agent that runs the spec; ``None`` uses OpenCode's default."""
     status: SpecStatus = SpecStatus.PROMPT_PENDING
     created_at: float = Field(default_factory=time.time)
     last_prompt_at: float = 0.0
     """Wall time of the latest prompt. Only a result written after it counts."""
     protected: dict[str, str] = Field(default_factory=dict[str, str])
+    protected_patterns: list[str] | None = None
+    """The globs ``protected`` is a snapshot of; ``None`` in state from before they were kept."""
     directives: dict[str, DirectiveRecord] = Field(default_factory=dict[str, DirectiveRecord])
     lost_sessions: list[str] = Field(default_factory=list[str])
 

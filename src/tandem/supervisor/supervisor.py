@@ -124,6 +124,8 @@ class StatusReport(BaseModel):
     spec_id: str | None
     session_id: str | None
     spec_status: SpecStatus | None
+    model: str | None = None
+    agent: str | None = None
     activity: ActivityReport
     active_directives: list[str]
     result: ImplementerResult | None
@@ -191,6 +193,7 @@ class Supervisor:
         )
 
     async def _resume(self, record: SpecRecord) -> None:
+        self._reconcile_protected(record)
         running = record.status in (SpecStatus.ACTIVE, SpecStatus.PROMPT_PENDING)
         try:
             await self.api.get_session(record.session_id)
@@ -220,6 +223,34 @@ class Supervisor:
                 await self._redeliver_directive(record, directive)
         await self.resync()
 
+    def _reconcile_protected(self, record: SpecRecord) -> None:
+        """Move a resumed spec onto this run's protect list, if its files are intact.
+
+        A restart may protect different files. Checking the spec against the new
+        list would flag every file only one list covers, so the old files are
+        checked against the old baseline instead. Intact, the spec starts a fresh
+        baseline under the new list. Not intact, the old list stays in force and
+        the files must be restored, as for any violation.
+        """
+        patterns = list(self.protected.patterns)
+        if record.protected_patterns == patterns:
+            return
+        changed = self._protected_changes(record)
+        if changed:
+            self.journal.append(
+                "protected_reconcile_refused", spec_id=record.spec_id, files=changed
+            )
+            return
+        self.journal.append(
+            "protected_rebaselined",
+            spec_id=record.spec_id,
+            previous=record.protected_patterns,
+            current=patterns,
+        )
+        record.protected = self.protected.snapshot()
+        record.protected_patterns = patterns
+        self._save()
+
     async def begin_shutdown(self) -> None:
         """Release every ``wait`` so a long poll cannot hold the process open."""
         self.closing = True
@@ -233,15 +264,20 @@ class Supervisor:
 
     # ---- specs -------------------------------------------------------------
 
-    async def submit_spec(self, spec_id: str, text: str) -> SpecRecord:
+    async def submit_spec(
+        self, spec_id: str, text: str, *, model: str | None = None, agent: str | None = None
+    ) -> SpecRecord:
         spec_digest = digest(text)
         async with self._mutex:
             existing = self.state.specs.get(spec_id)
             if existing is not None:
-                if existing.digest != spec_digest:
+                if existing.digest != spec_digest or (existing.model, existing.agent) != (
+                    model,
+                    agent,
+                ):
                     raise ConflictError(
                         f"Spec ID {spec_id} is immutable and was already submitted with "
-                        "different text; send the change under a new Spec ID"
+                        "different text, model or agent; send the change under a new Spec ID"
                     )
                 if spec_id != self.state.current_spec_id:
                     raise ConflictError(
@@ -263,7 +299,10 @@ class Supervisor:
                 digest=spec_digest,
                 text=text,
                 session_id=session.id,
+                model=model,
+                agent=agent,
                 protected=self.protected.snapshot(),
+                protected_patterns=list(self.protected.patterns),
             )
             self.state.specs[spec_id] = record
             self.state.current_spec_id = spec_id
@@ -490,6 +529,8 @@ class Supervisor:
             spec_id=record.spec_id if record else None,
             session_id=record.session_id if record else None,
             spec_status=record.status if record else None,
+            model=self._model_name(record),
+            agent=record.agent if record else None,
             activity=self.tracker.describe(),
             active_directives=record.active_directives if record else [],
             result=self.result(),
@@ -597,8 +638,15 @@ class Supervisor:
         if record is None:
             return
         pending, statuses = await asyncio.gather(self.pending(), self.api.session_status())
-        mine = {p.id for p in pending.permissions if p.session_id == record.session_id}
-        mine |= {q.id for q in pending.questions if q.session_id == record.session_id}
+        # A subagent started while the stream was down is only known by its parent.
+        for session_id in {p.session_id for p in [*pending.permissions, *pending.questions]}:
+            if session_id not in self.tracker.family:
+                with contextlib.suppress(OpenCodeError):
+                    parent = (await self.api.get_session(session_id)).parent_id
+                    self.tracker.adopt(session_id, parent)
+        family = self.tracker.family
+        mine = {p.id for p in pending.permissions if p.session_id in family}
+        mine |= {q.id for q in pending.questions if q.session_id in family}
         self.tracker.sync_pending(mine)
         status = statuses.get(record.session_id)
         self.tracker.sync_busy(status is not None and status.type in ("busy", "retry"))
@@ -626,7 +674,7 @@ class Supervisor:
         record = self.state.current
         if record is None or record.status is not SpecStatus.ACTIVE:
             return
-        changed = self.protected.changes(record.protected)
+        changed = self._protected_changes(record)
         if changed:
             await self._protected_violation(record, changed)
         elif (result := self._fresh_result(record)) is not None:
@@ -694,10 +742,16 @@ class Supervisor:
         self.tracker.turn_started()
         record.last_prompt_at = time.time()
         try:
-            await self.api.prompt(record.session_id, text, self.model)
+            model = ModelRef.parse(record.model) if record.model else self.model
+            await self.api.prompt(record.session_id, text, model, record.agent)
         except BaseException:
             self.tracker.turn_ended()
             raise
+
+    def _model_name(self, record: SpecRecord | None) -> str | None:
+        if record is not None and record.model:
+            return record.model
+        return f"{self.model.provider_id}/{self.model.model_id}" if self.model else None
 
     async def _session_contains(self, session_id: str, marker: str) -> bool:
         messages = await self.api.messages(session_id)
@@ -738,11 +792,18 @@ class Supervisor:
     def _require_protected_intact(self, record: SpecRecord) -> None:
         if record.status is not SpecStatus.PROTECTED_VIOLATION:
             return
-        changed = self.protected.changes(record.protected)
+        changed = self._protected_changes(record)
         if changed:
             raise ConflictError(
                 f"protected files still differ: {', '.join(changed)}; restore them first"
             )
+
+    def _protected_changes(self, record: SpecRecord) -> list[str]:
+        """Protected files changed since ``record``'s baseline, under its own patterns."""
+        if record.protected_patterns is None:
+            return self.protected.entry_changes(record.protected)
+        guard = self.protected.with_patterns(tuple(record.protected_patterns))
+        return guard.changes(record.protected)
 
     def _save(self) -> None:
         self.store.save(self.state)

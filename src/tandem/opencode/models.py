@@ -37,6 +37,8 @@ class TokenUsage(_Model):
 
 class Session(_Model):
     id: str
+    parent_id: str | None = Field(default=None, alias="parentID")
+    """Set on a subagent's session: the session whose ``task`` tool started it."""
     title: str = ""
     cost: float = 0
     tokens: TokenUsage | None = None

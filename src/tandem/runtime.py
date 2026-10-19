@@ -27,7 +27,7 @@ from types import FrameType
 import uvicorn
 from pydantic import SecretStr
 
-from tandem.bridge.app import create_app
+from tandem.bridge.app import OpenCodeLogin, create_app
 from tandem.bridge.manifest import Manifest
 from tandem.config import Settings, TaskPaths
 from tandem.notify import Notifier
@@ -132,7 +132,11 @@ async def run(settings: Settings, *, ready: Callable[[Manifest], None] | None = 
         async with contextlib.AsyncExitStack() as stack:
             server = await stack.enter_async_context(
                 OpenCodeServer(
-                    binary, settings.task_dir, paths.opencode_log, settings.opencode_port
+                    binary,
+                    settings.task_dir,
+                    paths.opencode_log,
+                    settings.opencode_port,
+                    protected=tuple(settings.protected),
                 )
             )
             client = await stack.enter_async_context(
@@ -173,7 +177,12 @@ async def run(settings: Settings, *, ready: Callable[[Manifest], None] | None = 
 
             stop = asyncio.Event()
             token = secrets.token_urlsafe(32)
-            app = create_app(supervisor=supervisor, token=token, on_finish=stop.set)
+            app = create_app(
+                supervisor=supervisor,
+                token=token,
+                on_finish=stop.set,
+                opencode=OpenCodeLogin(server.base_url, server.password),
+            )
             sock = stack.enter_context(bind_loopback(settings.bridge_port))
             bridge = uvicorn.Server(
                 uvicorn.Config(
@@ -192,6 +201,7 @@ async def run(settings: Settings, *, ready: Callable[[Manifest], None] | None = 
                 state_dir=str(paths.root),
                 opencode_port=server.port,
                 opencode_version=str(version),
+                opencode_password=SecretStr(server.password),
             )
 
             with stop_on_signals(stop):

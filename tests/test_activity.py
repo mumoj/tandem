@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from tandem.opencode.events import Event
 from tandem.supervisor.activity import Activity, ActivityTracker
 from tests.fakes import FakeClock, event
 
@@ -121,3 +122,42 @@ def test_a_stale_idle_does_not_end_a_fresh_turn(tracker: ActivityTracker, clock:
     clock.advance(11)
     tracker.sync_busy(False)
     assert not tracker.busy
+
+
+def subagent_created(child: str = "ses_child", parent: str = SESSION) -> Event:
+    info = {"id": child, "parentID": parent, "title": "subagent"}
+    return event("session.created", sessionID=child, info=info)
+
+
+def test_a_subagent_permission_blocks_the_spec(tracker: ActivityTracker) -> None:
+    tracker.observe(subagent_created())
+    tracker.observe(event("permission.asked", id="per_9", sessionID="ses_child"))
+    assert tracker.classify() is Activity.BLOCKED
+    tracker.observe(event("permission.replied", requestID="per_9", sessionID="ses_child"))
+    assert tracker.classify() is Activity.WORKING
+
+
+def test_a_subagent_finishing_does_not_end_the_turn(tracker: ActivityTracker) -> None:
+    tracker.observe(subagent_created())
+    tracker.observe(event("session.idle", sessionID="ses_child"))
+    tracker.observe(event("session.error", sessionID="ses_child", error={"name": "X"}))
+    assert tracker.busy
+    assert tracker.error is None
+
+
+def test_subagent_work_keeps_the_spec_alive(tracker: ActivityTracker, clock: FakeClock) -> None:
+    tracker.observe(subagent_created())
+    clock.advance(290)
+    part = {"type": "tool", "callID": "c1", "tool": "read", "state": {"status": "running"}}
+    tracker.observe(event("message.part.updated", sessionID="ses_child", part=part))
+    clock.advance(290)
+    assert tracker.classify() is Activity.WORKING
+
+
+def test_grandchildren_are_followed_and_strangers_are_not(tracker: ActivityTracker) -> None:
+    tracker.observe(subagent_created("ses_child"))
+    tracker.observe(subagent_created("ses_grandchild", parent="ses_child"))
+    tracker.observe(subagent_created("ses_stranger", parent="ses_other"))
+    assert tracker.family == {SESSION, "ses_child", "ses_grandchild"}
+    tracker.track("ses_next")
+    assert tracker.family == {"ses_next"}

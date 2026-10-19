@@ -7,12 +7,15 @@ leaves a trace here without anyone reading a multi-megabyte session capture.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
 import os
 import time
 from collections import deque
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from tandem.supervisor.state import dump_jsonl
 
@@ -40,8 +43,42 @@ class Journal:
         summary = " ".join(f"{k}={v}" for k, v in details.items() if v not in (None, "", []))
         log.info("%s %s", action, summary)
 
+    def read_from(self, offset: int | None, limit: int) -> tuple[list[dict[str, Any]], int]:
+        """Whole lines after byte ``offset``, and the offset to continue from.
+
+        ``None`` starts from the last ``limit`` lines. A line still being
+        written is left for the next call rather than returned half-parsed.
+        """
+        if not self.path.exists():
+            return [], 0
+        with self.path.open("rb") as stream:
+            size = stream.seek(0, os.SEEK_END)
+            if offset is None or offset > size:
+                stream.seek(0)
+                lines = deque(stream, maxlen=limit)
+                return _parse(lines), size
+            stream.seek(offset)
+            entries: list[bytes] = []
+            position = offset
+            for line in stream:
+                if not line.endswith(b"\n") or len(entries) >= limit:
+                    break
+                entries.append(line)
+                position += len(line)
+            return _parse(entries), position
+
     def tail(self, count: int) -> list[str]:
         if not self.path.exists():
             return []
         with self.path.open(encoding="utf-8") as stream:
             return [line.rstrip("\n") for line in deque(stream, maxlen=count)]
+
+
+def _parse(lines: Iterable[bytes]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for line in lines:
+        with contextlib.suppress(ValueError):
+            entry = json.loads(line)
+            if isinstance(entry, dict):
+                entries.append(cast(dict[str, Any], entry))
+    return entries

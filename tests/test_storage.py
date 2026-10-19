@@ -62,6 +62,28 @@ def test_one_supervisor_per_task(tmp_path: Path) -> None:
         pass  # released on exit
 
 
+def test_journal_reads_incrementally_and_skips_a_partial_line(tmp_path: Path) -> None:
+    journal = Journal(tmp_path / "journal.jsonl")
+    assert journal.read_from(None, 10) == ([], 0)
+    for n in range(5):
+        journal.append("step", n=n)
+
+    tail, offset = journal.read_from(None, 2)
+    assert [e["n"] for e in tail] == [3, 4]
+    assert journal.read_from(offset, 10) == ([], offset)
+
+    journal.append("step", n=5)
+    with journal.path.open("a") as stream:
+        stream.write('{"n": 6, "action": "half')  # a writer mid-line
+    entries, after = journal.read_from(offset, 10)
+    assert [e["n"] for e in entries] == [5]
+    assert journal.read_from(after, 10) == ([], after)
+
+    first, cursor = journal.read_from(0, 2)
+    assert [e["n"] for e in first] == [0, 1]
+    assert [e["n"] for e in journal.read_from(cursor, 2)[0]] == [2, 3]
+
+
 def test_journal_appends_with_time_and_action_last(tmp_path: Path) -> None:
     journal = Journal(tmp_path / "journal.jsonl")
     journal.append("prompt", time="spoofed", characters=12)
@@ -134,13 +156,18 @@ def test_manifest_keeps_the_token_private(tmp_path: Path) -> None:
         token=SecretStr("s3cret"),
         task_dir="/t",
         state_dir=str(tmp_path),
+        opencode_password=SecretStr("ocpw"),
     )
     path = tmp_path / "manifest.json"
     manifest.write(path)
 
     assert mode(path) == 0o600
-    assert Manifest.read(path).token.get_secret_value() == "s3cret"
+    read = Manifest.read(path)
+    assert read.token.get_secret_value() == "s3cret"
+    assert read.opencode_password is not None
+    assert read.opencode_password.get_secret_value() == "ocpw"
     assert "s3cret" not in repr(manifest)
+    assert "ocpw" not in repr(manifest)
     assert manifest.alive
     Manifest.remove(path)
     assert not path.exists()

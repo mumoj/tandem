@@ -61,7 +61,9 @@ class OpenCodeAPI(Protocol):
 
     async def messages(self, session_id: str, limit: int | None = None) -> list[Message]: ...
 
-    async def prompt(self, session_id: str, text: str, model: ModelRef | None) -> None: ...
+    async def prompt(
+        self, session_id: str, text: str, model: ModelRef | None, agent: str | None = None
+    ) -> None: ...
 
     async def abort(self, session_id: str) -> bool: ...
 
@@ -173,11 +175,15 @@ class OpenCodeClient:
         response = await self._request("GET", f"/session/{session_id}/message", params=params)
         return _MESSAGES.validate_json(response.content)
 
-    async def prompt(self, session_id: str, text: str, model: ModelRef | None) -> None:
+    async def prompt(
+        self, session_id: str, text: str, model: ModelRef | None, agent: str | None = None
+    ) -> None:
         """Queue a prompt and return at once. The turn runs on the server."""
         body: dict[str, Any] = {"parts": [{"type": "text", "text": text}]}
         if model is not None:
             body["model"] = model.model_dump(by_alias=True)
+        if agent is not None:
+            body["agent"] = agent
         await self._request("POST", f"/session/{session_id}/prompt_async", json=body)
 
     async def abort(self, session_id: str) -> bool:

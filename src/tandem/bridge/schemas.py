@@ -7,14 +7,14 @@ rejected by its pattern before any handler runs.
 
 from __future__ import annotations
 
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints, model_validator
 
-from tandem.opencode.models import FileDiff, Message, PermissionReply
+from tandem.opencode.models import FileDiff, Message, ModelRef, PermissionReply
 from tandem.supervisor.results import ImplementerResult
 from tandem.supervisor.state import DirectiveAction, SpecStatus
-from tandem.supervisor.supervisor import StatusReport, WaitReason
+from tandem.supervisor.supervisor import Pending, StatusReport, WaitReason
 
 
 def _not_blank(value: str) -> str:
@@ -34,9 +34,19 @@ PermissionId = Annotated[str, StringConstraints(pattern=r"^per[A-Za-z0-9_]+$")]
 QuestionId = Annotated[str, StringConstraints(pattern=r"^que[A-Za-z0-9_]+$")]
 
 
+def _provider_model(value: str | None) -> str | None:
+    if value is not None:
+        ModelRef.parse(value)
+    return value
+
+
 class SpecIn(BaseModel):
     spec_id: Identifier
     text: Text
+    model: Annotated[str | None, AfterValidator(_provider_model)] = None
+    """``provider/model`` for this spec; omitted uses the supervisor's default."""
+    agent: Identifier | None = None
+    """An OpenCode agent name, such as ``build`` or one from the project's config."""
 
 
 class PromptIn(BaseModel):
@@ -98,6 +108,28 @@ class WaitOut(BaseModel):
     reason: WaitReason
     detail: str
     status: StatusReport
+
+
+class OverviewOut(BaseModel):
+    """Everything the dashboard redraws on each poll, in one round trip."""
+
+    status: StatusReport
+    attention: WaitReason | None
+    """What ``wait`` would return right now; ``None`` while the implementer works."""
+    attention_detail: str
+    pending: Pending
+
+
+class JournalOut(BaseModel):
+    entries: list[dict[str, Any]]
+    next: int
+    """Pass back as ``after`` to read only what was appended since."""
+
+
+class OpenCodeOut(BaseModel):
+    url: str | None
+    user: str = "opencode"
+    password: str | None
 
 
 class ResultOut(BaseModel):

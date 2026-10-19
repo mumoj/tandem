@@ -9,6 +9,7 @@ dependencies = [
     "fastapi>=0.115",
     "httpx>=0.28",
     "httpx-sse>=0.4",
+    "mcp>=1.20",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "typer>=0.15",

@@ -7,16 +7,22 @@ call from either lands in the same journal.
 It binds to loopback and deliberately does not proxy OpenCode. A dozen named
 operations keep the trial's networking private and make every intervention an
 explicit, auditable call.
+
+``/ui`` is the one unauthenticated route: a static page holding no data. It
+reads the token from its URL fragment, which browsers never send to a server,
+and calls the same authenticated endpoints as everyone else.
 """
 
 from __future__ import annotations
 
 import hmac
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from importlib.resources import files
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
@@ -26,9 +32,12 @@ from tandem.bridge.schemas import (
     DiffOut,
     DirectiveIn,
     DirectiveOut,
+    JournalOut,
     MessageOut,
     MessagesOut,
     Ok,
+    OpenCodeOut,
+    OverviewOut,
     PermissionIn,
     PromptIn,
     ResultOut,
@@ -107,6 +116,34 @@ async def read_status(supervisor: SupervisorDep) -> StatusReport:
     return supervisor.status()
 
 
+@router.get("/overview")
+async def read_overview(supervisor: SupervisorDep) -> OverviewOut:
+    attention = supervisor.attention()
+    return OverviewOut(
+        status=supervisor.status(),
+        attention=attention.reason if attention else None,
+        attention_detail=attention.detail if attention else "",
+        pending=await supervisor.pending(),
+    )
+
+
+@router.get("/journal")
+async def read_journal(
+    supervisor: SupervisorDep,
+    after: Annotated[int | None, Query(ge=0)] = None,
+    limit: Annotated[int, Query(gt=0, le=1000)] = 200,
+) -> JournalOut:
+    entries, offset = supervisor.journal.read_from(after, limit)
+    return JournalOut(entries=entries, next=offset)
+
+
+@router.get("/opencode")
+async def read_opencode(request: Request) -> OpenCodeOut:
+    """OpenCode's own web UI for this task, for watching the session live."""
+    login: OpenCodeLogin | None = request.app.state.opencode
+    return OpenCodeOut(url=login.url if login else None, password=login.password if login else None)
+
+
 @router.get("/wait")
 async def wait(
     supervisor: SupervisorDep,
@@ -152,7 +189,9 @@ async def read_cost(supervisor: SupervisorDep) -> CostReport:
 @router.post("/spec")
 async def submit_spec(body: SpecIn, supervisor: SupervisorDep) -> SpecOut:
     """Start a spec in a fresh session. Idempotent for the same id and text."""
-    record = await supervisor.submit_spec(body.spec_id, body.text)
+    record = await supervisor.submit_spec(
+        body.spec_id, body.text, model=body.model, agent=body.agent
+    )
     return _spec_out(supervisor, record)
 
 
@@ -210,6 +249,28 @@ async def finish(request: Request) -> Ok:
     return Ok(detail="stopping")
 
 
+@dataclass(frozen=True, slots=True)
+class OpenCodeLogin:
+    url: str
+    password: str
+
+
+def _dashboard() -> HTMLResponse:
+    page = files("tandem.bridge").joinpath("dashboard.html").read_text(encoding="utf-8")
+    return HTMLResponse(
+        page,
+        headers={
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+            "X-Frame-Options": "DENY",
+            "Content-Security-Policy": (
+                "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+                "connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'"
+            ),
+        },
+    )
+
+
 def _error(status_code: int) -> Callable[[Request, Exception], Awaitable[Response]]:
     async def handler(_request: Request, exc: Exception) -> Response:
         return JSONResponse({"detail": str(exc)}, status_code=status_code)
@@ -222,6 +283,7 @@ def create_app(
     supervisor: Supervisor | None = None,
     token: str,
     on_finish: Callable[[], None] = lambda: None,
+    opencode: OpenCodeLogin | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="tandem bridge",
@@ -231,6 +293,7 @@ def create_app(
     app.state.supervisor = supervisor
     app.state.token = token
     app.state.on_finish = on_finish
+    app.state.opencode = opencode
     app.add_middleware(BodyLimit)
     app.add_exception_handler(SupervisorError, _error(status.HTTP_409_CONFLICT))
     # Starlette walks the exception's MRO, so NotFoundError gets its own status even
@@ -238,4 +301,5 @@ def create_app(
     app.add_exception_handler(OpenCodeError, _error(status.HTTP_502_BAD_GATEWAY))
     app.add_exception_handler(NotFoundError, _error(status.HTTP_404_NOT_FOUND))
     app.include_router(router)
+    app.add_api_route("/ui", _dashboard, methods=["GET"], include_in_schema=False)
     return app

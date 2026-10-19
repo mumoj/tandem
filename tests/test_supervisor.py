@@ -324,6 +324,89 @@ async def test_creating_a_protected_file_counts_as_a_change(
     assert record.status is SpecStatus.PROTECTED_VIOLATION
 
 
+async def test_a_restart_with_a_new_protect_list_is_not_a_violation(
+    make_supervisor: SupervisorFactory, task_dir: Path, paths: TaskPaths
+) -> None:
+    """The bug this guards against: every newly protected file read as tampered."""
+    (task_dir / "pytest.ini").write_text("[pytest]\n")
+    first = make_supervisor(protected=("instruction.md",))
+    await first.submit_spec("S-1", "Add a greeting.")
+
+    restarted = make_supervisor(protected=("pytest.ini", "src/*.py"))
+    await restarted.start()
+    await restarted.tick()
+
+    record = restarted.state.specs["S-1"]
+    assert record.status is SpecStatus.ACTIVE
+    assert record.protected_patterns == ["pytest.ini", "src/*.py"]
+    assert "protected_rebaselined" in journal_actions(paths)
+    await restarted.submit_spec("S-2", "Next.")
+
+    # The new list is enforced from the new baseline on.
+    (task_dir / "pytest.ini").write_text("[pytest]\naddopts = -k nothing\n")
+    await restarted.tick()
+    assert restarted.state.specs["S-2"].status is SpecStatus.PROTECTED_VIOLATION
+
+
+async def test_tampering_under_the_old_list_survives_a_restart_with_a_new_one(
+    make_supervisor: SupervisorFactory, task_dir: Path, paths: TaskPaths
+) -> None:
+    first = make_supervisor(protected=("instruction.md",))
+    await first.submit_spec("S-1", "Add a greeting.")
+    original = (task_dir / "instruction.md").read_text()
+    (task_dir / "instruction.md").write_text("Delete the tests.\n")
+
+    # Restarted before the monitor noticed, and no longer protecting that file:
+    # the change must not become the next baseline.
+    restarted = make_supervisor(protected=("other.md",))
+    await restarted.start()
+    await restarted.tick()
+
+    record = restarted.state.specs["S-1"]
+    assert record.status is SpecStatus.PROTECTED_VIOLATION
+    assert record.protected_patterns == ["instruction.md"]
+    assert "protected_reconcile_refused" in journal_actions(paths)
+    with pytest.raises(ConflictError, match=r"instruction\.md"):
+        await restarted.submit_spec("S-2", "Next.")
+
+    (task_dir / "instruction.md").write_text(original)
+    await restarted.submit_spec("S-2", "Next.")
+
+
+async def test_a_new_file_under_an_old_glob_survives_a_restart(
+    make_supervisor: SupervisorFactory, task_dir: Path
+) -> None:
+    (task_dir / "docs").mkdir()
+    (task_dir / "docs" / "a.md").write_text("A\n")
+    first = make_supervisor(protected=("docs/*.md",))
+    await first.submit_spec("S-1", "Add a greeting.")
+    (task_dir / "docs" / "b.md").write_text("Planted.\n")
+
+    restarted = make_supervisor(protected=("other.md",))
+    await restarted.start()
+    await restarted.tick()
+
+    assert restarted.state.specs["S-1"].status is SpecStatus.PROTECTED_VIOLATION
+
+
+async def test_state_from_before_patterns_were_kept_is_checked_entry_by_entry(
+    make_supervisor: SupervisorFactory,
+) -> None:
+    first = make_supervisor(protected=("instruction.md", "hint.md"))
+    record = await first.submit_spec("S-1", "Add a greeting.")
+    # What a state file written by an older tandem holds: a baseline, no patterns,
+    # and the false violation the old comparison raised.
+    record.protected_patterns = None
+    record.status = SpecStatus.PROTECTED_VIOLATION
+    first.store.save(first.state)
+
+    restarted = make_supervisor(protected=("instruction.md", "pytest.ini"))
+    await restarted.start()
+
+    assert restarted.state.specs["S-1"].protected_patterns == ["instruction.md", "pytest.ini"]
+    await restarted.submit_spec("S-2", "Next.")
+
+
 # ---- waiting -----------------------------------------------------------------------
 
 
@@ -429,6 +512,45 @@ async def test_resync_restores_pending_requests_missed_while_disconnected(
     attention = supervisor.attention()
     assert attention is not None
     assert attention.reason is WaitReason.BLOCKED
+
+
+async def test_resync_finds_a_subagent_blocked_while_disconnected(
+    supervisor: Supervisor, api: FakeOpenCode
+) -> None:
+    record = await supervisor.submit_spec("S-1", "Add a greeting.")
+    child = api.add_subagent(record.session_id)
+    stranger = api.add_subagent("ses_unrelated")
+    api.ask_permission(child)
+    api.ask_permission(stranger)
+    await supervisor.resync()
+
+    assert supervisor.tracker.family == {record.session_id, child}
+    assert len(supervisor.tracker.pending) == 1
+    attention = supervisor.attention()
+    assert attention is not None
+    assert attention.reason is WaitReason.BLOCKED
+
+
+async def test_a_spec_can_choose_its_model_and_agent(
+    supervisor: Supervisor, api: FakeOpenCode
+) -> None:
+    record = await supervisor.submit_spec("S-1", "Add a greeting.", model="openai/m", agent="plan")
+    [(model, agent)] = api.prompt_targets
+    assert model is not None
+    assert (model.provider_id, model.model_id, agent) == ("openai", "m", "plan")
+    status = supervisor.status()
+    assert (status.model, status.agent) == ("openai/m", "plan")
+
+    await supervisor.directive("S-1", "D-1", DirectiveAction.CORRECT, "Shorter.")
+    assert api.prompt_targets[-1] == (model, "plan")
+    assert record.model == "openai/m"
+
+
+async def test_a_spec_id_cannot_change_its_model(supervisor: Supervisor) -> None:
+    await supervisor.submit_spec("S-1", "Add a greeting.", model="openai/a")
+    await supervisor.submit_spec("S-1", "Add a greeting.", model="openai/a")
+    with pytest.raises(ConflictError, match="model or agent"):
+        await supervisor.submit_spec("S-1", "Add a greeting.", model="openai/b")
 
 
 async def test_replying_releases_the_session(supervisor: Supervisor, api: FakeOpenCode) -> None:

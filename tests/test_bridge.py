@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 
-from tandem.bridge.app import create_app
+from tandem.bridge.app import OpenCodeLogin, create_app
 from tandem.supervisor.supervisor import Supervisor
 from tests.fakes import FakeOpenCode
 
@@ -135,3 +135,52 @@ async def test_cost_diff_and_finish(http: httpx.AsyncClient) -> None:
 async def test_oversized_bodies_are_refused(http: httpx.AsyncClient) -> None:
     response = await http.post("/prompt", content=b"x" * 70_000)
     assert response.status_code == 413
+
+
+async def test_the_dashboard_page_is_public_but_holds_no_data(http: httpx.AsyncClient) -> None:
+    del http.headers["Authorization"]
+    page = await http.get("/ui")
+    assert page.status_code == 200
+    assert page.headers["content-type"].startswith("text/html")
+    assert "connect-src 'self'" in page.headers["content-security-policy"]
+    assert page.headers["referrer-policy"] == "no-referrer"
+    assert TOKEN not in page.text
+    for path in ("/overview", "/journal", "/opencode"):
+        assert (await http.get(path)).status_code == 401
+
+
+async def test_overview_says_what_wait_would(http: httpx.AsyncClient, api: FakeOpenCode) -> None:
+    empty = (await http.get("/overview")).json()
+    assert empty["attention"] == "no_spec"
+
+    await http.post("/spec", json={"spec_id": "S-1", "text": "Add a greeting.", "agent": "plan"})
+    overview = (await http.get("/overview")).json()
+    assert overview["attention"] is None
+    assert overview["status"]["agent"] == "plan"
+    assert overview["pending"] == {"permissions": [], "questions": []}
+
+
+async def test_journal_pages_from_an_offset(http: httpx.AsyncClient) -> None:
+    await http.post("/spec", json={"spec_id": "S-1", "text": "Add a greeting."})
+    first = (await http.get("/journal")).json()
+    assert "session_created" in [e["action"] for e in first["entries"]]
+    again = (await http.get("/journal", params={"after": first["next"]})).json()
+    assert again == {"entries": [], "next": first["next"]}
+
+
+async def test_a_bad_model_is_refused_before_the_supervisor(http: httpx.AsyncClient) -> None:
+    response = await http.post("/spec", json={"spec_id": "S-1", "text": "x", "model": "nomodel"})
+    assert response.status_code == 422
+
+
+async def test_opencode_login_is_served_to_token_holders(supervisor: Supervisor) -> None:
+    app = create_app(
+        supervisor=supervisor, token=TOKEN, opencode=OpenCodeLogin("http://127.0.0.1:9", "pw")
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://bridge",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    ) as client:
+        login = (await client.get("/opencode")).json()
+    assert login == {"url": "http://127.0.0.1:9", "user": "opencode", "password": "pw"}

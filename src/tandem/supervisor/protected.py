@@ -57,13 +57,38 @@ class ProtectedFiles:
         return state
 
     def changes(self, baseline: dict[str, str]) -> list[str]:
-        """Names whose content differs from ``baseline``, sorted."""
+        """Names whose content differs from ``baseline``, sorted.
+
+        Only meaningful when ``baseline`` is a snapshot of these same patterns:
+        under other patterns, every file one side covers and the other does not
+        would read as changed.
+        """
         current = self.snapshot()
         return sorted(
             name
             for name in current.keys() | baseline.keys()
             if current.get(name) != baseline.get(name)
         )
+
+    def with_patterns(self, patterns: tuple[str, ...]) -> ProtectedFiles:
+        return ProtectedFiles(self.root, patterns)
+
+    def entry_changes(self, baseline: dict[str, str]) -> list[str]:
+        """The entries of ``baseline`` that no longer hold, when its patterns are unknown.
+
+        A path entry must still hash the same, and a pattern recorded as matching
+        nothing must still match nothing. A new file under a glob that already had
+        matches cannot be told apart, so this is the fallback for state written
+        before baselines recorded their patterns.
+        """
+        changed: list[str] = []
+        for name, recorded in baseline.items():
+            if recorded == MISSING:
+                if any(path.is_file() for path in self.root.glob(name)):
+                    changed.append(name)
+            elif _digest(self.root / name) != recorded:
+                changed.append(name)
+        return sorted(changed)
 
 
 def _digest(path: Path) -> str:

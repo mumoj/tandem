@@ -8,6 +8,12 @@ description: Drive an OpenCode implementer through tandem - write a spec, submit
 You write specs and review results. The implementer, a cheaper model in OpenCode, writes the
 code. Do not do its work for it, and do not take its word for anything.
 
+If tandem's MCP tools are available, use them instead of the commands below; the loop is the
+same. `submit_spec`, `wait`, `get_result`, `get_pending`, `reply_permission`,
+`answer_question`, `send_directive` and `finish` map onto `spec`, `wait`, `result` and `diff`,
+`pending`, `allow`/`deny`, `answer`, `directive` and `finish`. Give the human the `dashboard`
+link from the first reply.
+
 ## The loop
 
 1. **Write the spec to a file.** One outcome, the files it may touch, how to check it is done.

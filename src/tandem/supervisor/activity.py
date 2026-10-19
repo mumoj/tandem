@@ -59,9 +59,12 @@ class ActivityReport(BaseModel):
 
 @dataclass
 class ActivityTracker:
-    """Fold one session's events into an ``Activity``.
+    """Fold one session's events, and its subagents', into an ``Activity``.
 
     Feed it every event with ``observe``; it ignores events for other sessions.
+    A subagent runs in a child session. Its tools, text and permission requests
+    count, since a subagent stuck on a prompt is the spec stuck on a prompt, but
+    its idle and errors do not end the parent's turn.
     ``classify`` is cheap and side-effect free, so callers can ask as often as
     they like.
     """
@@ -79,6 +82,7 @@ class ActivityTracker:
     last_text: float = 0.0
     turn_started_at: float = 0.0
     pending: set[str] = field(default_factory=set[str])
+    children: set[str] = field(default_factory=set[str])
     running_tools: dict[str, str] = field(default_factory=dict[str, str])
 
     def __post_init__(self) -> None:
@@ -87,6 +91,7 @@ class ActivityTracker:
     def track(self, session_id: str | None) -> None:
         """Start following a different session, forgetting the previous one."""
         self.session_id = session_id
+        self.children.clear()
         self.busy = False
         self.error = None
         self.retry = None
@@ -125,10 +130,29 @@ class ActivityTracker:
         elif not busy and self.busy and self.clock() - self.turn_started_at > grace:
             self.turn_ended()
 
+    @property
+    def family(self) -> set[str]:
+        """The tracked session and every subagent session descended from it."""
+        return {self.session_id, *self.children} if self.session_id else set()
+
+    def adopt(self, session_id: str, parent_id: str | None) -> bool:
+        """Follow ``session_id`` too if it descends from the tracked session."""
+        if parent_id is not None and parent_id in self.family:
+            self.children.add(session_id)
+            return True
+        return False
+
     def observe(self, event: Event) -> None:
-        if self.session_id is None or event.session_id != self.session_id:
+        if event.type == "session.created":
+            child = dig_str(event.properties, "info", "id")
+            if child:
+                self.adopt(child, dig_str(event.properties, "info", "parentID"))
+        if self.session_id is None or event.session_id not in self.family:
             return
         now = self.clock()
+        if event.session_id != self.session_id:
+            self._observe_child(event, now)
+            return
         match event.type:
             case "session.status":
                 kind = event.prop("status", "type")
@@ -156,6 +180,22 @@ class ActivityTracker:
                     name = event.error_name or "error"
                     self.error = f"{name}: {event.error_message}"[:300]
                 self.turn_ended()
+            case _:
+                pass
+
+    def _observe_child(self, event: Event, now: float) -> None:
+        match event.type:
+            case "message.part.updated":
+                self._observe_part(event.prop("part"), now)
+            case "message.part.delta":
+                if event.prop("field") == "text":
+                    self.last_text = now
+            case "permission.asked" | "question.asked":
+                if event.request_id:
+                    self.pending.add(event.request_id)
+            case "permission.replied" | "question.replied" | "question.rejected":
+                if event.request_id:
+                    self.pending.discard(event.request_id)
             case _:
                 pass
 

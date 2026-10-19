@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import re
@@ -19,7 +20,7 @@ import socket
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
-from typing import Self
+from typing import Any, Self, cast
 
 import httpx
 
@@ -95,6 +96,30 @@ def free_port() -> int:
         return int(probe.getsockname()[1])
 
 
+def permission_config(existing: str | None, protected: tuple[str, ...]) -> str:
+    """``OPENCODE_PERMISSION`` with an ask rule for each protected glob merged in.
+
+    The per-session ruleset reaches only the session tandem creates. A subagent
+    started by the task tool gets a session of its own with its agent's rules,
+    so without this it could edit a protected file unasked. Config-level rules
+    land after each agent's broad allow, and OpenCode lets the last match win.
+    """
+    config: dict[str, Any] = {}
+    if existing:
+        with contextlib.suppress(ValueError):
+            parsed = json.loads(existing)
+            if isinstance(parsed, dict):
+                config = cast(dict[str, Any], parsed)
+    edit = config.get("edit")
+    rules: dict[str, Any] = (
+        dict(cast(dict[str, Any], edit)) if isinstance(edit, dict) else {"*": edit} if edit else {}
+    )
+    rules |= dict.fromkeys(protected, "ask")
+    if rules:
+        config["edit"] = rules
+    return json.dumps(config)
+
+
 @dataclass
 class OpenCodeServer:
     """One ``opencode serve`` on loopback, protected by a per-run password.
@@ -108,6 +133,8 @@ class OpenCodeServer:
     log_path: Path
     port: int = 0
     startup_timeout: float = 30.0
+    protected: tuple[str, ...] = ()
+    """Globs every session must ask before editing, subagents' included."""
     password: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     process: asyncio.subprocess.Process | None = field(default=None, init=False)
 
@@ -131,6 +158,10 @@ class OpenCodeServer:
         if not self.port:
             self.port = free_port()
         env = {**os.environ, "OPENCODE_SERVER_PASSWORD": self.password}
+        if self.protected:
+            env["OPENCODE_PERMISSION"] = permission_config(
+                os.environ.get("OPENCODE_PERMISSION"), self.protected
+            )
         # Append, never truncate: after a crash the previous incarnation's
         # output is the only record of why it stopped.
         with self.log_path.open("ab") as sink:

@@ -51,6 +51,7 @@ class FakeSession:
     prompts: list[str] = field(default_factory=list[str])
     cost: float = 0.0
     tokens: TokenUsage = field(default_factory=TokenUsage)
+    parent_id: str | None = None
 
 
 class FakeOpenCode:
@@ -63,10 +64,17 @@ class FakeOpenCode:
         self.question_replies: list[tuple[str, list[list[str]] | None]] = []
         self.statuses: dict[str, SessionStatus] = {}
         self.fail_prompts = False
+        self.prompt_targets: list[tuple[ModelRef | None, str | None]] = []
         self.event_queue: asyncio.Queue[Event | None] = asyncio.Queue()
         self._ids = itertools.count(1)
 
     # -- helpers for tests --------------------------------------------------
+
+    def add_subagent(self, parent_id: str) -> str:
+        """A child session, as OpenCode's task tool creates one, without an event."""
+        session_id = f"ses_{next(self._ids)}"
+        self.sessions[session_id] = FakeSession(session_id, "subagent", [], parent_id=parent_id)
+        return session_id
 
     def prompts(self, session_id: str) -> list[str]:
         return self.sessions[session_id].prompts
@@ -98,7 +106,15 @@ class FakeOpenCode:
 
     async def get_session(self, session_id: str) -> Session:
         session = self._session(session_id)
-        return Session(id=session.id, title=session.title, cost=session.cost, tokens=session.tokens)
+        return Session.model_validate(
+            {
+                "id": session.id,
+                "title": session.title,
+                "cost": session.cost,
+                "tokens": session.tokens,
+                "parentID": session.parent_id,
+            }
+        )
 
     async def session_status(self) -> dict[str, SessionStatus]:
         return dict(self.statuses)
@@ -114,10 +130,13 @@ class FakeOpenCode:
         ]
         return messages[-limit:] if limit else messages
 
-    async def prompt(self, session_id: str, text: str, model: ModelRef | None) -> None:
+    async def prompt(
+        self, session_id: str, text: str, model: ModelRef | None, agent: str | None = None
+    ) -> None:
         if self.fail_prompts:
             raise OpenCodeError("POST", f"/session/{session_id}/prompt_async", 500, "boom")
         self._session(session_id).prompts.append(text)
+        self.prompt_targets.append((model, agent))
 
     async def abort(self, session_id: str) -> bool:
         self._session(session_id)

@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>tandem</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1f2328; --muted: #59636e; --line: #d8dee4;
+    --soft: #eef1f4; --accent: #2f6fdb; --work: #7a4fd0; --ok: #1a7f37; --warn: #9a6700;
+    --alert: #c2410c; --bad: #cf222e;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --panel: #161b22; --ink: #e6edf3; --muted: #9198a1; --line: #30363d;
+      --soft: #1f2630; --accent: #5b9bff; --work: #b18cf2; --ok: #4ccb6b; --warn: #d29922;
+      --alert: #ff8a5c; --bad: #ff6b6b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 2; background: var(--panel);
+    border-bottom: 1px solid var(--line); padding: 12px 16px;
+    display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+  header .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  header .meta b { color: var(--ink); font-weight: 600; font-family: var(--mono); font-size: 12.5px; }
+  header .spacer { flex: 1; }
+  main {
+    max-width: 1280px; margin: 0 auto; padding: 16px;
+    display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
+  }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; font-weight: 650; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; background: var(--soft); }
+  .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .s-working { color: var(--work); } .s-idle { color: var(--muted); } .s-blocked { color: var(--alert); }
+  .s-hung, .s-reasoning_stall { color: var(--warn); } .s-error, .s-protected_violation { color: var(--bad); }
+  .s-result { color: var(--ok); } .s-offline { color: var(--bad); }
+  .s-working::before { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .headline { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--soft); border-radius: 8px; padding: 8px 10px; }
+  .stat .k { color: var(--muted); font-size: 12px; }
+  .stat .v { font-size: 15px; font-weight: 600; font-family: var(--mono); overflow-wrap: anywhere; }
+  .needs { border-color: var(--alert); box-shadow: 0 0 0 1px var(--alert) inset; }
+  .req { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+  .req:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+  .req .what { font-weight: 600; }
+  .req .pat { font-family: var(--mono); font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+  pre { font-family: var(--mono); font-size: 12px; background: var(--soft); border-radius: 8px; padding: 10px; overflow: auto; max-height: 280px; margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+  button, .btn {
+    font: inherit; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; text-decoration: none;
+  }
+  button:hover, .btn:hover { border-color: var(--muted); }
+  button.primary { background: var(--ok); border-color: var(--ok); color: #fff; }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=text] { font: inherit; flex: 1; min-width: 160px; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+  .msg { border-left: 3px solid var(--line); padding: 2px 0 2px 10px; margin: 10px 0; }
+  .msg.assistant { border-color: var(--work); }
+  .msg.user { border-color: var(--accent); }
+  .msg .who { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .msg .text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+  .tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .tool { font-family: var(--mono); font-size: 11.5px; background: var(--soft); border-radius: 5px; padding: 1px 6px; color: var(--muted); }
+  .timeline { list-style: none; margin: 0; padding: 0; max-height: 72vh; overflow: auto; }
+  .timeline li { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; padding: 6px 0; border-top: 1px solid var(--soft); }
+  .timeline li:first-child { border-top: 0; }
+  .timeline time { color: var(--muted); font-family: var(--mono); font-size: 12px; padding-top: 1px; }
+  .timeline .t { overflow-wrap: anywhere; }
+  .timeline .d { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--muted); }
+  .k-spec { background: var(--accent); } .k-human { background: var(--alert); } .k-ok { background: var(--ok); }
+  .k-bad { background: var(--bad); } .k-work { background: var(--work); }
+  .files { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 12.5px; }
+  .files li { display: flex; gap: 10px; padding: 2px 0; }
+  .files .add { color: var(--ok); } .files .del { color: var(--bad); }
+  .empty { color: var(--muted); font-style: italic; }
+  .banner { margin: 16px; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--bad); color: var(--bad); background: var(--panel); }
+  .hidden { display: none !important; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  code { font-family: var(--mono); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="task">tandem</h1>
+  <span id="state" class="pill s-idle">connecting</span>
+  <div class="meta">
+    <span>spec <b id="spec">-</b></span>
+    <span>model <b id="model">default</b></span>
+    <span>agent <b id="agent">default</b></span>
+  </div>
+  <span class="spacer"></span>
+  <a id="oc" class="btn hidden" target="_blank" rel="noreferrer">Open in OpenCode ↗</a>
+</header>
+<div id="banner" class="banner hidden"></div>
+<main>
+  <div class="col">
+    <section id="needs" class="needs hidden" aria-live="polite">
+      <h2>Needs you</h2>
+      <div id="requests"></div>
+    </section>
+    <section>
+      <h2>Now</h2>
+      <p class="headline" id="headline">Waiting for the supervisor…</p>
+      <p class="sub" id="subline"></p>
+      <div class="stats">
+        <div class="stat"><div class="k">last tool</div><div class="v" id="since-tool">-</div></div>
+        <div class="stat"><div class="k">last text</div><div class="v" id="since-text">-</div></div>
+        <div class="stat"><div class="k">running</div><div class="v" id="running">-</div></div>
+        <div class="stat"><div class="k">spend</div><div class="v" id="cost">-</div></div>
+      </div>
+      <div class="row">
+        <button id="abort" class="danger" disabled>Stop this turn</button>
+        <span class="sub" id="oc-login"></span>
+      </div>
+    </section>
+    <section>
+      <h2>Implementer</h2>
+      <div id="messages"><p class="empty">No messages yet.</p></div>
+    </section>
+    <section>
+      <h2>Result and changes</h2>
+      <div id="result"><p class="empty">No result for this spec yet.</p></div>
+      <ul class="files" id="diff"></ul>
+      <details id="spec-text-box" class="hidden"><summary>Spec text</summary><pre id="spec-text"></pre></details>
+    </section>
+  </div>
+  <div class="col">
+    <section>
+      <h2>Timeline</h2>
+      <ul class="timeline" id="timeline"></ul>
+    </section>
+  </div>
+</main>
+<script>
+"use strict";
+// The token arrives in the fragment and is kept per tab, so a reload still works
+// after it is taken out of the address bar.
+function readToken() {
+  const fromLink = new URLSearchParams(location.hash.slice(1)).get("token");
+  try {
+    if (fromLink) sessionStorage.setItem("tandem-token", fromLink);
+    return fromLink || sessionStorage.getItem("tandem-token") || "";
+  } catch { return fromLink || ""; }
+}
+const token = readToken();
+const $ = (id) => document.getElementById(id);
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") node.className = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v);
+  }
+  for (const child of children.flat()) {
+    if (child == null || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+class Unauthorized extends Error {}
+
+async function api(path, body) {
+  const response = await fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { Authorization: "Bearer " + token, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (response.status === 401) throw new Unauthorized();
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : response.statusText);
+  return data;
+}
+
+function ago(seconds) {
+  if (seconds == null) return "-";
+  if (seconds < 60) return seconds + "s ago";
+  if (seconds < 3600) return Math.floor(seconds / 60) + "m " + (seconds % 60) + "s ago";
+  return Math.floor(seconds / 3600) + "h " + Math.floor((seconds % 3600) / 60) + "m ago";
+}
+
+function clock(t) {
+  const d = new Date(t * 1000);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
+const STATES = {
+  working: ["working", "The implementer is working."],
+  idle: ["idle", "Nothing is running."],
+  blocked: ["blocked", "Waiting on a permission or a question. See “Needs you”."],
+  hung: ["hung", "Nothing has arrived for a while. It may be stuck."],
+  reasoning_stall: ["reasoning stall", "Text but no tool calls for a long time. The spec may contradict itself."],
+  error: ["error", "The provider returned an error."],
+};
+
+const ATTENTION = {
+  result: ["result", "A result is in. The planner reviews it next."],
+  turn_ended: ["turn ended", "The turn ended without a result."],
+  blocked: ["blocked", "Waiting on a permission or a question. See “Needs you”."],
+  reasoning_stall: ["reasoning stall", "Text but no tool calls for a long time. The spec may contradict itself."],
+  hung: ["hung", "Nothing has arrived for a while. It may be stuck."],
+  error: ["error", "The provider returned an error."],
+  protected_violation: ["protected file changed", "A protected file changed. The spec was stopped."],
+  no_spec: ["no spec", "No spec has been submitted yet."],
+  stopped: ["stopping", "The supervisor is shutting down."],
+};
+
+let lastSpec = null;
+let lastSpecStatus = null;
+let journalNext = null;
+
+function setState(cls, label) {
+  const pill = $("state");
+  pill.className = "pill s-" + cls;
+  pill.textContent = label;
+}
+
+function renderOverview(o) {
+  const s = o.status;
+  const a = s.activity;
+  document.title = "tandem · " + (s.task_dir.split("/").filter(Boolean).pop() || "task");
+  $("task").textContent = s.task_dir.split("/").filter(Boolean).pop() || s.task_dir;
+  $("task").title = s.task_dir;
+  $("spec").textContent = s.spec_id || "-";
+  $("model").textContent = s.model || "default";
+  $("agent").textContent = s.agent || "default";
+
+  let key, label, line;
+  if (o.attention && ATTENTION[o.attention]) {
+    [label, line] = ATTENTION[o.attention];
+    key = o.attention;
+  } else {
+    [label, line] = STATES[a.activity] || [a.activity, ""];
+    key = a.activity;
+  }
+  setState(key, label);
+  $("headline").textContent = line;
+  const sub = [];
+  if (o.attention_detail) sub.push(o.attention_detail);
+  if (a.error) sub.push(a.error);
+  if (a.retry) sub.push("retrying: " + a.retry);
+  if (s.active_directives.length) sub.push("directives in force: " + s.active_directives.join(", "));
+  $("subline").textContent = sub.join(" · ");
+  $("since-tool").textContent = ago(a.seconds_since_tool);
+  $("since-text").textContent = ago(a.seconds_since_text);
+  $("running").textContent = a.running_tools.length ? a.running_tools.join(", ") : "nothing";
+  $("abort").disabled = !a.busy;
+
+  renderPending(o.pending);
+
+  if (s.spec_id !== lastSpec || s.spec_status !== lastSpecStatus) {
+    lastSpec = s.spec_id;
+    lastSpecStatus = s.spec_status;
+    refreshResult();
+  }
+}
+
+function renderPending(p) {
+  const box = $("requests");
+  box.replaceChildren();
+  for (const req of p.permissions) box.append(permissionCard(req));
+  for (const req of p.questions) box.append(questionCard(req));
+  $("needs").classList.toggle("hidden", !box.children.length);
+}
+
+function permissionCard(req) {
+  const reason = el("input", { type: "text", placeholder: "Reason, sent to the implementer (optional)" });
+  const diff = req.metadata && (req.metadata.diff || req.metadata.command);
+  const reply = (kind) => async () => {
+    await act(() => api("/permission", { id: req.id, reply: kind, message: reason.value || null }));
+  };
+  return el("div", { class: "req" },
+    el("div", { class: "what" }, "Permission: " + req.permission),
+    el("div", { class: "pat" }, (req.patterns || []).join("  ")),
+    diff ? el("pre", {}, String(diff)) : null,
+    el("div", { class: "row" },
+      el("button", { class: "primary", onclick: reply("once") }, "Allow once"),
+      el("button", { onclick: reply("always"), title: "Allow this for the rest of the session" }, "Always"),
+      el("button", { class: "danger", onclick: reply("reject") }, "Deny"),
+      reason));
+}
+
+function questionCard(req) {
+  const card = el("div", { class: "req" });
+  const picks = req.questions.map(() => new Set());
+  req.questions.forEach((q, i) => {
+    card.append(el("div", { class: "what" }, q.header ? q.header + ": " + q.question : q.question));
+    const row = el("div", { class: "row" });
+    for (const option of q.options) {
+      const button = el("button", { title: option.description || "" }, option.label);
+      button.addEventListener("click", () => {
+        if (!q.multiple) { picks[i].clear(); row.querySelectorAll("button").forEach((b) => b.classList.remove("primary")); }
+        if (picks[i].has(option.label)) { picks[i].delete(option.label); button.classList.remove("primary"); }
+        else { picks[i].add(option.label); button.classList.add("primary"); }
+      });
+      row.append(button);
+    }
+    card.append(row);
+  });
+  card.append(el("div", { class: "row" },
+    el("button", { class: "primary", onclick: () => act(() => api("/answer", { id: req.id, answers: picks.map((s) => [...s]) })) }, "Send answer"),
+    el("button", { class: "danger", onclick: () => act(() => api("/answer", { id: req.id, reject: true })) }, "Decline")));
+  return card;
+}
+
+async function act(call) {
+  try { await call(); } catch (error) { alert(error.message); }
+  poll();
+}
+
+async function refreshResult() {
+  const box = $("result");
+  try {
+    const r = await api("/result");
+    box.replaceChildren(r.result
+      ? el("div", {},
+          el("p", { class: "headline" }, "Verdict: " + r.result.verdict),
+          el("p", { class: "sub" }, r.result.summary || ""),
+          el("p", { class: "sub" }, "This is the implementer's own claim. The planner checks it against the diff."))
+      : el("p", { class: "empty" }, lastSpec ? "No result for this spec yet." : "No spec yet."));
+  } catch (error) { if (error instanceof Unauthorized) throw error; }
+  refreshDiff();
+}
+
+async function refreshDiff() {
+  const list = $("diff");
+  try {
+    const d = await api("/diff");
+    list.replaceChildren(...d.files.map((f) => el("li", {},
+      el("span", { class: "add" }, "+" + (f.additions || 0)),
+      el("span", { class: "del" }, "-" + (f.deletions || 0)),
+      el("span", {}, f.file || "?"))));
+  } catch { list.replaceChildren(); }
+}
+
+async function refreshMessages() {
+  if (!lastSpec) return;
+  try {
+    const m = await api("/messages?limit=8");
+    const box = $("messages");
+    const shown = m.messages.filter((x) => x.text || x.tools.length);
+    box.replaceChildren(...(shown.length ? shown : []).map((x) => el("div", { class: "msg " + x.role },
+      el("div", { class: "who" }, x.role === "assistant" ? "implementer" : x.role === "user" ? "prompt" : x.role),
+      x.text ? el("div", { class: "text" }, x.text.length > 2400 ? x.text.slice(0, 2400) + "…" : x.text) : null,
+      x.tools.length ? el("div", { class: "tools" }, x.tools.map((t) => el("span", { class: "tool" }, t))) : null)));
+    if (!shown.length) box.replaceChildren(el("p", { class: "empty" }, "No messages yet."));
+  } catch (error) { if (error instanceof Unauthorized) throw error; }
+}
+
+async function refreshCost() {
+  try {
+    const c = await api("/cost");
+    const tokens = c.total_tokens.input + c.total_tokens.output;
+    $("cost").textContent = "$" + c.total_cost.toFixed(4) + " · " + Math.round(tokens / 1000) + "k tok";
+  } catch (error) { if (error instanceof Unauthorized) throw error; }
+}
+
+function describe(e) {
+  const spec = e.spec_id ? " " + e.spec_id : "";
+  switch (e.action) {
+    case "supervisor_started": return ["work", "Supervisor started", ""];
+    case "supervisor_stopped": return ["", "Supervisor stopped", ""];
+    case "bridge_ready": return ["", "Bridge ready", ""];
+    case "session_created": return ["spec", "Spec" + spec + " submitted", "new session " + e.session_id];
+    case "spec_delivered": return ["spec", "Spec" + spec + " delivered", e.recovered ? "already delivered before a restart" : ""];
+    case "spec_retired": return ["", "Spec" + spec + " retired", e.status || ""];
+    case "directive_delivered": return ["spec", "Directive " + e.directive_id + " (" + String(e.directive_action).toLowerCase() + ")", "for" + spec];
+    case "directive_retracted": return ["spec", "Directive " + e.directive_id + " retracted", ""];
+    case "prompt": return ["spec", "Message sent to the implementer", e.characters + " characters"];
+    case "abort": return ["human", "Turn stopped", ""];
+    case "permission": return ["human", "Permission " + ({ once: "allowed once", always: "always allowed", reject: "denied" }[e.reply] || "answered"), e.request_id || ""];
+    case "question": return ["human", e.disposition === "reject" ? "Question declined" : "Question answered", ""];
+    case "result_observed": return ["ok", "Result written:" + spec, [e.verdict && "verdict " + e.verdict, e.summary].filter(Boolean).join(" · ")];
+    case "protected_violation": return ["bad", "Protected files changed", (e.files || []).join(", ")];
+    case "activity": return [e.current === "working" ? "work" : ["blocked", "hung", "reasoning_stall", "error"].includes(e.current) ? "bad" : "", "Now " + String(e.current).replace("_", " "), "was " + String(e.previous).replace("_", " ")];
+    case "stream_event": return [e.stream_type === "session.error" ? "bad" : e.stream_type === "permission.asked" || e.stream_type === "question.asked" ? "human" : "", e.stream_type, e.summary || ""];
+    case "session_missing": return ["bad", "Session lost; work redelivered", e.session_id || ""];
+    default: return [/fail|error/.test(e.action) ? "bad" : "", e.action.replaceAll("_", " "), e.error || e.detail || ""];
+  }
+}
+
+function renderJournal(entries) {
+  const list = $("timeline");
+  const pinned = list.scrollTop < 8;
+  for (const e of entries) {
+    const [kind, title, detail] = describe(e);
+    list.prepend(el("li", {},
+      el("time", {}, e.time ? clock(e.time) : ""),
+      el("div", {},
+        el("div", { class: "t" }, el("span", { class: "dot k-" + kind }), title),
+        detail ? el("div", { class: "d" }, detail.length > 400 ? detail.slice(0, 400) + "…" : detail) : null)));
+  }
+  while (list.children.length > 400) list.lastChild.remove();
+  if (pinned) list.scrollTop = 0;
+}
+
+async function refreshJournal() {
+  const j = await api("/journal" + (journalNext == null ? "?limit=200" : "?after=" + journalNext));
+  journalNext = j.next;
+  if (j.entries.length) renderJournal(j.entries);
+}
+
+let ticks = 0;
+let offline = false;
+
+async function poll() {
+  try {
+    renderOverview(await api("/overview"));
+    await refreshJournal();
+    if (ticks % 2 === 0) await refreshMessages();
+    if (ticks % 5 === 0) refreshDiff();
+    if (ticks % 10 === 0) refreshCost();
+    if (offline) { offline = false; $("banner").classList.add("hidden"); }
+  } catch (error) {
+    offline = true;
+    const banner = $("banner");
+    banner.classList.remove("hidden");
+    if (error instanceof Unauthorized) {
+      banner.textContent = "This link's token is missing or out of date. Ask the planner for the dashboard link again.";
+      setState("offline", "no access");
+      return;
+    }
+    banner.textContent = "The supervisor is not answering. It may have stopped. Retrying…";
+    setState("offline", "offline");
+  }
+}
+
+async function setupOpenCode() {
+  try {
+    const login = await api("/opencode");
+    if (!login.url) return;
+    const link = $("oc");
+    link.href = login.url;
+    link.classList.remove("hidden");
+    const copy = el("button", { onclick: async () => {
+      try { await navigator.clipboard.writeText(login.password); copy.textContent = "Password copied"; }
+      catch { prompt("OpenCode password (user: opencode)", login.password); }
+    } }, "Copy OpenCode password");
+    $("oc-login").replaceChildren("OpenCode asks for a login: user ", el("code", {}, "opencode"), ", then ", copy);
+  } catch { /* older supervisor */ }
+}
+
+$("abort").addEventListener("click", () => {
+  if (confirm("Stop the implementer's current turn? The session stays open.")) act(() => api("/abort", {}));
+});
+
+if (!token) {
+  $("banner").textContent = "This page needs the link the planner gave you, which carries an access token.";
+  $("banner").classList.remove("hidden");
+  setState("offline", "no access");
+} else {
+  // Keep the token out of the address bar once it is read, so it is not shoulder-surfed or bookmarked by accident.
+  history.replaceState(null, "", location.pathname);
+  setupOpenCode();
+  poll();
+  setInterval(() => { ticks++; poll(); }, 2000);
+}
+</script>
+</body>
+</html>

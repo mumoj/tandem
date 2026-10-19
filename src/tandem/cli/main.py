@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from collections import deque
 from collections.abc import Generator
@@ -198,9 +199,9 @@ def serve(
 
     def ready(manifest: Manifest) -> None:
         typer.echo(
-            f"bridge   {manifest.url}  (OpenCode {manifest.opencode_version})\n"
-            f"state    {manifest.state_dir}\n"
-            f"drive it with: tandem --task {Path(manifest.state_dir).name} status",
+            f"bridge    {manifest.url}  (OpenCode {manifest.opencode_version})\n"
+            f"state     {manifest.state_dir}\n"
+            f"dashboard {manifest.dashboard_url}",
             err=True,
         )
 
@@ -216,6 +217,18 @@ def serve(
         pass
 
 
+@app.command()
+def mcp() -> None:
+    """Serve tandem's tools over MCP on stdio, for a planner like Claude Code or Codex.
+
+    Register once: `claude mcp add tandem -- tandem mcp`. The implementer then starts
+    on first use in the planner's project; nobody needs `serve` or `--task`.
+    """
+    from tandem.mcp_server import main as serve_mcp  # deferred: pulls in the MCP SDK
+
+    serve_mcp()
+
+
 # ---- specs and directives --------------------------------------------------
 
 
@@ -227,11 +240,18 @@ def spec(
     file: Annotated[
         Path | None, typer.Option("--file", "-f", help="Read the spec from a file.")
     ] = None,
+    model: Annotated[
+        str | None, typer.Option("--model", "-m", help="provider/model for this spec only.")
+    ] = None,
+    agent: Annotated[
+        str | None, typer.Option("--agent", "-a", help="OpenCode agent to run the spec.")
+    ] = None,
     as_json: JsonOption = False,
 ) -> None:
     """Start SPEC_ID in a fresh session. Resending the same id and text is a no-op."""
     with bridge(ctx) as client:
         body = {"spec_id": spec_id, "text": _read_text(text, file)}
+        body |= {key: value for key, value in (("model", model), ("agent", agent)) if value}
         out = client.post("/spec", SpecOut, body)
         _emit(out, as_json, [f"{out.spec_id} -> {out.session_id} [{out.status}]"])
 
@@ -480,3 +500,40 @@ def where(ctx: typer.Context) -> None:
             f"bridge   {m.url}\nstate    {m.state_dir}\ntask     {m.task_dir}\n"
             f"pid      {m.pid}\nopencode {m.opencode_version} on port {m.opencode_port}"
         )
+
+
+@app.command()
+def attach(
+    ctx: typer.Context,
+    web: Annotated[
+        bool, typer.Option("--web", help="Print a browser URL and login instead.")
+    ] = False,
+    opencode_bin: Annotated[
+        str, typer.Option(envvar="TANDEM_OPENCODE_BIN", help="Default: opencode on PATH.")
+    ] = "opencode",
+) -> None:
+    """Watch the implementer live in OpenCode's own TUI, or its web UI with --web.
+
+    Attaching is watching the same session the supervisor drives: typing into it
+    sends prompts the journal never sees, so prefer `say` or `directive` there.
+    """
+    with bridge(ctx) as client:
+        m = client.manifest
+        session_id = client.get("/status", StatusReport).session_id
+    if m.opencode_url is None or m.opencode_password is None:
+        _fail(CliError("this supervisor predates `attach`; restart it to enable it"))
+    password = m.opencode_password.get_secret_value()
+    if web:
+        typer.echo(f"url      {m.opencode_url}\nuser     opencode\npassword {password}")
+        if session_id:
+            typer.echo(f"session  {session_id}")
+        return
+    argv = [opencode_bin, "attach", m.opencode_url, "--dir", m.task_dir]
+    if session_id:
+        argv += ["--session", session_id]
+    # The password goes in the environment, not argv, where `ps` would show it.
+    env = {**os.environ, "OPENCODE_SERVER_PASSWORD": password}
+    try:
+        os.execvpe(opencode_bin, argv, env)
+    except FileNotFoundError:
+        _fail(CliError(f"{opencode_bin} not found on PATH", 2))
