@@ -198,30 +198,50 @@ human can unblock a run without a terminal. **Open in OpenCode** opens OpenCode'
 the same server. The access token travels in the link's `#fragment`, which browsers never send
 to a server.
 
-## Quickstart: the CLI
+## The CLI: for humans and scripts
 
-Under the hood, the MCP tools drive the same bridge as the CLI, which is still there for
-scripts and for a phone over SSH:
+A planner should use the MCP tools. The CLI drives the same bridge, so it is for everything
+else:
+
+- **Stepping in from a terminal.** Over SSH from a phone, with no browser and no open port:
+  see what is blocked, allow or deny it, and check on spend.
+- **Scripts and CI.** Exit codes carry the reason (see [Exit codes](#exit-codes)), and
+  `--json` gives the raw response, so a shell loop can drive an implementer with no planner.
+- **Planners without MCP.** Anything that can run a shell command can use tandem.
+- **A standalone supervisor.** `tandem serve` runs one task in its own process, outside any
+  planner session.
+
+Stepping in on a running implementer, whoever started it:
+
+```bash
+tandem status                      # what it is doing, and why `wait` would return now
+tandem wait                        # blocks until something needs you
+tandem pending                     # what it is waiting on
+tandem allow                       # or: tandem deny --message "leave that file alone"
+tandem log                         # the journal
+tandem cost
+```
+
+Running a task without MCP, from a script or a planner that shells out:
 
 ```bash
 tandem serve ~/work/my-task -m openrouter/qwen/qwen3-coder -p instruction.md
 ```
 
-In another shell, or from the planner:
+In another shell:
 
 ```bash
 tandem spec S-1 --file spec.md     # fresh session, spec delivered (-m/--agent: per spec)
-tandem wait                        # blocks until something needs you
-tandem pending                     # what it is waiting on
-tandem allow                       # or: tandem deny --message "leave that file alone"
-tandem wait
+tandem wait                        # exit code says why it returned
 tandem result                      # the implementer's own verdict
 tandem diff                        # what it actually changed: check, don't trust
 tandem directive S-1 D-1 correct "Use the existing retry helper."
 tandem spec S-2 --file next.md     # requirements changed: new id, new session
-tandem cost
 tandem finish
 ```
+
+These verbs mirror the MCP tools one for one: `spec` is `submit_spec`, `directive` is
+`send_directive`, `allow`/`deny` are `reply_permission`, and so on.
 
 To watch the implementer work, `tandem attach` opens OpenCode's own TUI on the live session,
 and `tandem attach --web` prints a URL and login for OpenCode's web UI. Watch there, but steer
@@ -230,10 +250,11 @@ with `say` or `directive`: a prompt typed into OpenCode never reaches the journa
 With one supervisor running, no flags are needed to find it. With several, pass `--task`
 with a name prefix, the task directory, or the state directory.
 
-## The planner loop
+## Exit codes
 
-`tandem wait` returns when the implementer needs the planner, and its exit code says why, so
-a planner can branch without parsing anything:
+`tandem wait` returns when the implementer needs attention, and its exit code says why, so a
+script can branch without parsing anything. The MCP `wait` tool returns the same `reason`
+with a `next_step`.
 
 | exit | reason | do this |
 |---|---|---|
@@ -250,8 +271,8 @@ a planner can branch without parsing anything:
 planner that calls it in a loop cannot miss a wakeup. A result is reported once the turn is
 over, not when the file lands, so the planner never reviews a moving target.
 
-[`skills/tandem-planner/SKILL.md`](skills/tandem-planner/SKILL.md) is this loop written as an
-Agent Skill for Claude Code or Codex.
+[`skills/tandem-planner/SKILL.md`](skills/tandem-planner/SKILL.md) is the planner loop written
+as an Agent Skill for Claude Code or Codex.
 
 ## What it enforces
 
@@ -369,6 +390,10 @@ guard, and a supervisor restart mid-spec. The MCP tools are tested against a moc
 - **The MCP server is a thin client.** `tandem mcp` holds no state: it finds a supervisor by
   directory, starts one detached if there is none, and calls the same bridge endpoints as the
   CLI. Restarting the planner loses nothing.
+- **The CLI came first.** Any agent can run a shell command, so tandem began as a CLI a
+  planner shelled out to, with exit codes as its interface. Structured tools suited planners
+  better, so MCP took over that role; the CLI stayed because a human in a terminal, and a
+  script in CI, still need a way in.
 - **The dashboard is one static page.** It holds no data and needs no build step. It reads its
   token from the URL fragment and polls the same authenticated endpoints as everyone else.
 
