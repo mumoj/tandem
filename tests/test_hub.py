@@ -119,3 +119,14 @@ async def test_closing_the_hub_stops_its_tasks_and_opencode(tmp_path: Path) -> N
     assert not host.alive
     assert not host.record.exists()
     assert not TaskPaths.for_task(hub.state_root, directory).manifest.exists()
+
+
+async def test_a_task_without_a_model_falls_back_to_the_environment(
+    hub: Hub, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TANDEM_MODEL", "openai/from-env")
+    monkeypatch.setenv("TANDEM_PROTECTED", '["instruction.md"]')
+    manifest = await hub.start_task(task_dir(tmp_path, "alpha"))
+    async with bridge(manifest) as client:
+        status = (await client.get("/status")).json()
+    assert status["model"] == "openai/from-env"

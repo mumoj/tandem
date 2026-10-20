@@ -20,7 +20,7 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from importlib.resources import files
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import anyio.to_thread
 import uvicorn
@@ -151,13 +151,15 @@ class Hub:
         if task_dir in self._tasks:
             return Manifest.read(paths.manifest)
         opencode = await self._ready_opencode()
+        # Only what was asked for: an explicit None would hide TANDEM_MODEL and
+        # TANDEM_PROTECTED, since pydantic-settings prefers arguments to the environment.
+        chosen: dict[str, Any] = {"model": model, "protected": protect}
         settings = Settings(
             task_dir=task_dir,
             state_root=self.state_root,
-            model=model,
-            protected=protect or [],
             opencode_url=opencode.url,
             opencode_password=SecretStr(opencode.password),
+            **{key: value for key, value in chosen.items() if value is not None},
         )
         ready: asyncio.Future[Manifest] = asyncio.get_running_loop().create_future()
         done = asyncio.create_task(self._run(settings, paths, ready))
